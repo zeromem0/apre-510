@@ -1,0 +1,32 @@
+# Published: the sources of the tester, the script the README uses, the
+# ready-made tester, the pictures and the buttons page. Everything else stays
+# local: the FNIRSI firmware and anything made from it (fw/, update/), the
+# test builds that run over SWD and their tools, notes.
+/*
+!/.gitignore
+!/README.md
+!/platformio.ini
+!/src/
+!/tools/
+!/bin/
+!/docs/
+
+/src/*
+!/src/app/
+!/src/boot/
+!/src/hw/
+/src/hw/*
+!/src/hw/Lcd.cpp
+!/src/hw/Lcd.h
+!/src/hw/Probe.cpp
+!/src/hw/Probe.h
+# built without them (NO_USB_SENDER)
+/src/app/TtlApp.*
+/src/app/Export.cpp
+
+/tools/*
+!/tools/make_update.py
+
+/docs/*
+!/docs/screens/
+!/docs/buttons.html
