@@ -1260,10 +1260,18 @@ static void startUart(Lcd& tft) {
     settleThen(P_UART);
 }
 
-// A steady result. On RS232 at mark, read it as a serial line all the same
-// and wait for traffic (IDLE_WAIT_MS); anything else is said at once.
+// A result named by its level. On RS232 at mark, read it as a serial line
+// all the same and wait for traffic (IDLE_WAIT_MS); anything else is said at
+// once. Named so whether the line was quiet or not: bumps of a volt or so at
+// mark make it "active" with no detector taking it, and it was then said to
+// be "RS232 idle" every few seconds, a message of a line that talks every
+// two seconds slipping by each time (v0.21).
 static void finishSteady(Lcd& tft) {
-    if (!g_f.active && !g_v.lin && g_f.meanMv <= -3000 && g_f.meanMv >= -15000) {
+    // or with no name at all ("unknown", "activity": bumps of over 2 V, v0.22),
+    // so long as the whole window stays below -3 V: no frame of RS232 does
+    // that, its start bit crosses zero.
+    bool atMark = !strcmp(g_v.name, "RS232 idle") || (g_f.hiMv < -3000 && g_f.loMv > -16000);
+    if (!g_v.lin && !g_v.uart && atMark) {
         strcpy(g_v.name, "RS232");
         g_v.info[0] = 0;
         g_v.note = "";
@@ -1382,7 +1390,11 @@ static bool changed(bool& activity) {
     if (lo <= 16 || hi >= 4064) return true;
     bool quiet = (int32_t)(hi - lo) < g_need;
     int32_t loMv = toMv(lo), hiMv = toMv(hi), meanMv = toMv((int32_t)(sum / n));
-    if (!g_f.active) {
+    // A serial result whose levels are all at mark (read from rest, bumps and
+    // all: v0.22b) is taken as one read from a quiet line: its messages swing
+    // far past those levels, and that is the line talking.
+    bool restOnly = g_found.uart && g_f.hiMv < -3000;
+    if (!g_f.active || restOnly) {
         // A serial line read from rest (its levels are those of the rest):
         // traffic on it is the line talking, not another line. Taken for
         // another (v0.19), every message of a line that talks now and then

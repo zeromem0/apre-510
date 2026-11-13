@@ -7,9 +7,9 @@
 
 #define FW_NAME     "APRE-510"
 #if defined(ZX)
-#define FW_VERSION "0.21zx"     // flash_zx: flash_apre with the Spectrum (src/zx), local
+#define FW_VERSION "0.22zx"     // flash_zx: flash_apre with the Spectrum (src/zx), local
 #elif defined(NO_USB_SENDER)
-#define FW_VERSION "0.21"       // flash_apre: no USB Sender, AprecID first in the menu
+#define FW_VERSION "0.22"       // flash_apre: no USB Sender, AprecID first in the menu
 #else
 #define FW_VERSION "0.05"       // flash_t232, ram_t232: as dso510-link v0.05
 #endif

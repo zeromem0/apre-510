@@ -16,7 +16,7 @@ electrical health, and the data in hex and ASCII.
 APRE-510 runs **next to the FNIRSI firmware**, which stays as it is. Held at power-on, RUN starts
 APRE-510. Without it, the unit starts the FNIRSI firmware as before.
 
-![Menu](docs/screens/01_menu.png) ![AprecID on RS232](docs/screens/03_aprecid_rs232.png)
+![APRE-510: About, the menu, then AprecID on a sensor line: waveform, characters, messages](docs/demo.gif)
 
 More pictures in [`docs/screens`](docs/screens).
 
@@ -34,7 +34,7 @@ More pictures in [`docs/screens`](docs/screens).
     read. MODE shows the last five characters in boxes (CR and LF in green), the waveform, or the
     last messages a line each, with the time between them.
   - An RS232 line at rest is waited on for up to a minute, so a device that sends a message only
-    now and then is still read.
+    now and then is still read. The result stays on the screen between its messages.
   - Modbus RTU, RS485 (A and B wires), CAN (H and L), I2C (SCL), LIN, PWM (a square wave at a
     rate that is no standard speed is named PWM, not serial), each with details on AUTO.
   - **Hands-off** (Settings): the line is watched and recognised again when it changes, with a
@@ -119,7 +119,7 @@ FNIRSI USB update. It needs Python 3; nothing else.
 With the V2.2.1 application from FNIRSI (the `.zip`, or the `APP_*.bin` in it):
 
 ```
-python tools/make_update.py DSO-510_V2.2.1.zip bin/APRE-510_v0.21.bin
+python tools/make_update.py DSO-510_V2.2.1.zip bin/APRE-510_v0.22.bin
 ```
 
 or, after a build of your own (see below), with that build:
