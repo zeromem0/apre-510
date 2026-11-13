@@ -55,7 +55,10 @@ void  reset();                  // forget the speed and the shape, learn again
 // A speed given outright, read as 8N1 with nothing learnt and nothing to get
 // wrong, or 0 to work the speed and the shape out from the line. It starts
 // at 9600. Follow a change with reset().
-void     setFixedBaud(uint32_t baud);
+// With learnFrame the speed is given but the frame is still worked out from
+// the line (the inspector's first try, at 9600).
+void     setFixedBaud(uint32_t baud, bool learnFrame = false);
+bool     isStandard(uint32_t baud);         // one of the standard speeds, exactly
 uint32_t fixedBaud();
 
 void  setInverted(bool inv);

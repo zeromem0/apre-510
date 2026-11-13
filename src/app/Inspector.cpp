@@ -11,6 +11,7 @@
 #include "Beep.h"
 #include "Link.h"
 #include "DisplayLarge.h"
+#include "DisplayChars.h"
 
 namespace Insp {
 
@@ -98,6 +99,7 @@ struct Feat {
     bool     periodic;          // every high and every low alike: a PWM
     uint32_t freqHz;            // ... its frequency
     uint16_t dutyPm;            // ... and high time, per mille
+    bool     square;            // the few whole highs and lows that were caught are alike (freqHz, dutyPm set too)
     bool     clock;             // regular low pulses in bursts with long highs between: a clock like I2C SCL
     uint32_t clockHz;
     uint16_t perBurst;          // clocks in a burst
@@ -124,6 +126,16 @@ static Found   g_found;
 static uint32_t g_b0, g_tDecided;               // frames when the frame was settled, and when
 static bool     g_decided, g_retried;
 static uint8_t  g_relearns;                     // times the frame was learnt again after a bad score
+static bool     g_first9600;                    // 9600 not tried yet on this line
+static bool     g_at9600;                       // ... and this reading is that try
+// A line at RS232 mark, with nothing on it, may still talk now and then (an
+// instrument that sends a reading every half minute). It is read as a
+// serial line straight away and waited on: each try at it starts counting
+// from the first frame, not from when it began.
+static const uint32_t IDLE_WAIT_MS = 60000;
+static bool     g_idleWait;                     // this reading came from a quiet RS232 line
+static bool     g_traffic;                      // ... and this try has seen something on it
+static uint32_t g_waitT0;                       // ... since when it has waited
 static uint8_t  g_score;                        // 0..100, frames read cleanly
 static uint32_t g_scored;                       // how many frames that is of
 
@@ -141,7 +153,51 @@ static uint32_t g_drawMs;
 static char     g_txt[8];
 static uint8_t  g_txtN;
 static bool     g_txtNew;
-static bool     g_charsView = true;
+// What MODE shows in the place of the picture on a serial line: the last
+// characters in boxes, the picture, or the messages a line each (v0.19: a
+// line of text read whole, where each of its fields sits).
+enum { VIEW_BOXES, VIEW_WAVE, VIEW_LINES, NVIEW };
+static uint8_t  g_view = VIEW_BOXES;
+
+// The text for the lines view, kept across the readings of hands-off (each
+// message of a line that talks now and then starts one); a try that did
+// not hold is taken off again (g_linesKeep). Cleared on RUN and on entering.
+static char     g_lines[512];
+static int      g_linesN, g_linesKeep;
+static CharsGap g_lgaps[10];
+static uint8_t  g_lgapN;
+static uint32_t g_lastRxMs;
+static bool     g_linesNew;
+
+static void linesCut(int n) {                   // back to n characters
+    if (n > g_linesN) return;
+    g_linesN = n;
+    while (g_lgapN && g_lgaps[g_lgapN - 1].at >= n) g_lgapN--;
+    g_linesNew = true;
+}
+static void linesClear() { g_linesN = g_linesKeep = 0; g_lgapN = 0; g_lastRxMs = 0; g_linesNew = true; }
+static void linesAdd(char c) {
+    if (g_linesN == (int)sizeof(g_lines)) {      // full: the older half goes
+        int half = (int)sizeof(g_lines) / 2;
+        memmove(g_lines, g_lines + half, (size_t)half);
+        g_linesN -= half;
+        g_linesKeep = g_linesKeep > half ? g_linesKeep - half : 0;
+        uint8_t k = 0;
+        for (uint8_t i = 0; i < g_lgapN; i++)
+            if (g_lgaps[i].at - half > 0) { g_lgaps[k] = g_lgaps[i]; g_lgaps[k].at -= half; k++; }
+        g_lgapN = k;
+    }
+    uint32_t now = millis();
+    if (g_linesN && g_lastRxMs && now - g_lastRxMs >= 300) {
+        if (g_lgapN == sizeof(g_lgaps) / sizeof(g_lgaps[0])) { memmove(g_lgaps, g_lgaps + 1, sizeof(g_lgaps) - sizeof(g_lgaps[0])); g_lgapN--; }
+        g_lgaps[g_lgapN].at = g_linesN;
+        g_lgaps[g_lgapN].ms = now - g_lastRxMs;
+        g_lgapN++;
+    }
+    g_lastRxMs = now;
+    g_lines[g_linesN++] = c;
+    g_linesNew = true;
+}
 
 const Found& found() { return g_found; }
 
@@ -198,13 +254,17 @@ static bool steadyLevel(const Feat& f, Verdict& v) {
 }
 
 // Every high alike and every low alike, at whatever levels.
-static bool pwm(const Feat& f, Verdict& v) {
-    if (!f.active || !f.periodic) return false;
+static void namePwm(const Feat& f, Verdict& v) {
     printFreq(v.name, sizeof(v.name), "PWM", f.freqHz);
     char lo[10], hi[10];
     printMv(lo, sizeof(lo), f.loMv);
     printMv(hi, sizeof(hi), f.hiMv);
     snprintf(v.info, sizeof(v.info), "duty %u.%u%%  %s/%sV", f.dutyPm / 10, f.dutyPm % 10, lo, hi);
+}
+
+static bool pwm(const Feat& f, Verdict& v) {
+    if (!f.active || !f.periodic) return false;
+    namePwm(f, v);
     return true;
 }
 
@@ -508,6 +568,17 @@ static void timing(Feat& f) {
         f.freqHz = MEASURE_HZ / (mH + mL);
         f.dutyPm = (uint16_t)((uint32_t)mH * 1000 / (mH + mL));
     }
+    // A slow square wave (the 1 kHz of a calibration output): its half period
+    // is about a block long, and most stretches are cut by a block that went
+    // by unread, so the eight of each are never there. The few caught whole
+    // are enough to say it is one, once it has failed as a serial line
+    // (finishUart()).
+    f.square = f.periodic;
+    if (!f.periodic && nH >= 2 && nL >= 2 && within(H, nH, mH, 10) == 100 && within(L, nL, mL, 10) == 100) {
+        f.square = true;
+        f.freqHz = MEASURE_HZ / (mH + mL);
+        f.dutyPm = (uint16_t)((uint32_t)mH * 1000 / (mH + mL));
+    }
 
     // The shortest stretch that comes back: a glitch on the line (a spike of
     // a sample or a few, as when the sender's port is opened again at another
@@ -582,6 +653,52 @@ static void waveReset() {
     Acq::pause();
     g_waveN = 0; g_waveSpan = 0; g_waveNew = false;
     Acq::resume();
+}
+
+// A square wave in the picture block: three whole highs and three whole lows
+// at least, each kind alike within a tenth (and a sample). The stretches
+// measured at 2 MS/s (timing()) do not show a slow one: at 1 kHz a half
+// period is a block long, and blocks go by unread while the screen is drawn
+// (the calibration output: "pulse 367 us", 2026-11-11). The block kept while
+// the line is read as serial is at a rate that suits it, 10 ms of it at
+// 100 kS/s. Sets freqHz and dutyPm.
+static bool squareInWave(Feat& f) {
+    Acq::pause();
+    uint16_t n = g_waveN, lo = 0x0FFF, hi = 0;
+    for (uint16_t i = 0; i < n; i++) {
+        uint16_t v = g_wave[i] & 0x0FFF;
+        if (v < lo) lo = v;
+        if (v > hi) hi = v;
+    }
+    uint32_t sum[2] = { 0, 0 }, cnt[2] = { 0, 0 }, mn[2] = { 0xFFFFFFFFu, 0xFFFFFFFFu }, mx[2] = { 0, 0 };
+    if (n && hi > lo) {
+        uint16_t mid = (uint16_t)((lo + hi) / 2), hy = (uint16_t)((hi - lo) / 6);
+        bool high = (g_wave[0] & 0x0FFF) > mid, whole = false;
+        uint32_t run = 0;
+        for (uint16_t i = 1; i < n; i++) {
+            uint16_t v = g_wave[i] & 0x0FFF;
+            bool flip = high ? v < mid - hy : v > mid + hy;
+            if (!flip) { run++; continue; }
+            if (whole) {
+                uint8_t k = high ? 1 : 0;
+                run++;
+                sum[k] += run; cnt[k]++;
+                if (run < mn[k]) mn[k] = run;
+                if (run > mx[k]) mx[k] = run;
+            }
+            whole = true;
+            run = 0;
+            high = !high;
+        }
+    }
+    uint32_t hz = g_waveHz;
+    Acq::resume();
+    for (uint8_t k = 0; k < 2; k++)
+        if (cnt[k] < 3 || mx[k] * 10u > mn[k] * 11u + 10u) return false;
+    uint64_t per = (uint64_t)sum[1] * cnt[0] + (uint64_t)sum[0] * cnt[1];       // a period, times both counts
+    f.freqHz = (uint32_t)((uint64_t)hz * cnt[0] * cnt[1] / per);
+    f.dutyPm = (uint16_t)((uint64_t)sum[1] * cnt[0] * 1000u / per);
+    return true;
 }
 
 // --- the samples ----------------------------------------------------------------
@@ -703,7 +820,7 @@ static void footer(Lcd& tft) {
         tft.print(gap);
     }
     if (health) { tft.print((char)0x1F); tft.print(" health"); tft.print(gap); }
-    if (g_found.uart && !Config::demo) { tft.print(g_hint || health ? "OK tester" : "OK to the tester"); tft.print(gap); }
+    if (!Config::demo) { tft.print(g_hint || health ? "OK tester" : "OK to the tester"); tft.print(gap); }
     tft.print("OK held menu");
     if (Config::demo) {                         // on the same line: the rows above are full
         tft.setTextColor(TH.err, TH.bg);
@@ -725,6 +842,22 @@ static void drawBusy(Lcd& tft, const char* what) {
     tft.setCursor(8, VERDICT_Y + 8);
     tft.print(what);
     tft.print("...");
+}
+
+// A quiet RS232 line being waited on: said in full even hands-off, where the
+// last result would otherwise stay up, and that was another line.
+static void drawWaiting(Lcd& tft) {
+    tft.fillScreen(TH.bg);
+    bar(tft, "waiting for traffic");
+    tft.setTextSize(3);
+    tft.setTextColor(TH.text, TH.bg);
+    tft.setCursor(8, VERDICT_Y + 4);
+    tft.print("RS232 idle");
+    tft.setTextSize(2);
+    tft.setTextColor(TH.muted, TH.bg);
+    tft.setCursor(8, VERDICT_Y + 38);
+    tft.print("waiting for traffic...");
+    g_shown = false;
 }
 
 static void printTime(Lcd& tft, uint32_t ns) {
@@ -754,7 +887,10 @@ static bool readUart() {
     return g_found.uart && g_found.baud && !g_v.lin;
 }
 static bool showChars() {
-    return g_charsView && readUart();
+    return g_view == VIEW_BOXES && readUart();
+}
+static bool showLines() {
+    return g_view == VIEW_LINES && readUart();
 }
 
 // The last 5 characters in boxes, as on the DSO-152, where the picture is.
@@ -772,12 +908,30 @@ static void drawChars(Lcd& tft) {
     displayLargeSuffix(tft, g_txt, g_txtN, WAVE_Y + 12 + (WAVE_H - 13 - 40) / 2 + 6);
 }
 
+// The messages a line each, in the place of the
+// picture: the last six.
+static void drawLines(Lcd& tft, bool full) {
+    g_linesNew = false;
+    if (full) {
+        tft.fillRect(0, WAVE_Y, 320, WAVE_H, TH.bg);
+        tft.drawRect(0, WAVE_Y, 320, WAVE_H, TH.line);
+        tft.setTextSize(1);
+        tft.setTextColor(TH.muted, TH.bg);
+        tft.setCursor(4, WAVE_Y + 3);
+        tft.print("the messages, a line each");
+        tft.setCursor(256, WAVE_Y + 3);
+        tft.print("MODE boxes");
+    }
+    displayCharsLines(tft, g_lines, g_linesN, g_lgaps, g_lgapN, full, WAVE_Y + 13, 6);
+}
+
 static void drawWave(Lcd& tft) {
     static const char* const VDIV[] = { "10mV", "20mV", "50mV", "0.1V", "0.2V", "0.5V", "1V", "2V", "5V", "10V" };
     g_waveBusy = true;
     g_waveNew = false;
     Link::wave(g_wave, g_waveN, g_waveHz, "insp", "insp", false);    // the page has it in both views
     if (showChars()) { g_waveBusy = false; drawChars(tft); return; }
+    if (showLines()) { g_waveBusy = false; drawLines(tft, false); return; }
     tft.fillRect(0, WAVE_Y, 320, WAVE_H, TH.bg);
     tft.drawRect(0, WAVE_Y, 320, WAVE_H, TH.line);
     const int16_t top = WAVE_Y + 12, h = WAVE_H - 13;     // the labels above the trace
@@ -879,7 +1033,8 @@ static void drawResult(Lcd& tft) {
         tft.print(g_v.note);
     }
 
-    drawWave(tft);
+    if (showLines()) drawLines(tft, true);       // the screen is new: rule, frame and all
+    else             drawWave(tft);
 
     // the features, small, under the picture
     tft.setTextSize(1);
@@ -926,6 +1081,7 @@ static void settleThen(uint8_t ph) {
 static void mbReset();
 
 static void begin(Lcd& tft, bool full = false) {
+    g_linesKeep = g_linesN;                 // what the readings before found holds
     g_mon = false;
     g_full = full;
     g_hint = false;
@@ -938,7 +1094,9 @@ static void begin(Lcd& tft, bool full = false) {
     g_rx[0] = 0;
     g_txtN = 0; g_txtNew = false;
     g_decided = false; g_retried = false; g_relearns = 0;
+    g_first9600 = true; g_at9600 = false;
     g_score = 0; g_scored = 0;
+    g_idleWait = false; g_traffic = false;
     Acq::pause();
     Frontend::setCouplingDC(true);
     Frontend::setRange(RANGE_WIDE);
@@ -953,6 +1111,7 @@ void enter(Lcd& tft, Source src) {
     Keys::sync();
     g_src = src;
     g_shown = false;
+    linesClear();
     begin(tft);
 }
 
@@ -1012,6 +1171,8 @@ static void linkResult() {
 
 static void finish(Lcd& tft) {
     g_results++;
+    if (readUart()) g_linesKeep = g_linesN;
+    else            linesCut(g_linesKeep);
     g_phase = P_DONE;
     drawResult(tft);
     linkResult();
@@ -1059,15 +1220,30 @@ static void startUart(Lcd& tft) {
         for (uint8_t i = 0; i < sizeof(UART_RATES) / sizeof(UART_RATES[0]); i++)
             if (UART_RATES[i] >= 8 * baud) { rate = UART_RATES[i]; break; }
     }
+    // 9600 first, the speed most lines have: given outright, with
+    // only the frame to learn, it is read sooner and cannot be mislearnt. Not
+    // when the shortest pulse is plainly longer than its bit (104 us): a slow
+    // square wave reads as clean 9600 8N1 frames.
+    g_at9600 = g_first9600 && !g_v.lin && g_f.minRunNs <= 156000;
+    g_first9600 = false;
+    if (g_at9600) rate = UART_RATES[0];
+    // a quiet line has shown no pulse to size the rate by: after 9600, the
+    // fastest, which reads every speed up to 115200
+    else if (g_idleWait && !g_f.minRunNs) rate = UART_RATES[sizeof(UART_RATES) / sizeof(UART_RATES[0]) - 1];
     Acq::pause();
     g_phase = P_SETTLE;
     while (Rs232::read() >= 0) {}
     Rs232::setInverted(g_v.inverted);
     Rs232::setZeroCross(g_v.zeroCross);
-    Rs232::setFixedBaud(g_v.lin ? g_linBaud : 0);
+    if (g_at9600) Rs232::setFixedBaud(9600, true);
+    else          Rs232::setFixedBaud(g_v.lin ? g_linBaud : 0);
     Rs232::setBreaks(g_v.lin);
+    linesCut(g_linesKeep);                  // a try before this one in the same reading did not hold
     if (g_v.lin) linReset();
     Rs232::reset();
+    // RS232 waited on from rest: its threshold is zero volts from the start,
+    // so the decoder reads the block in which it learns the levels too.
+    if (g_idleWait && g_v.zeroCross) Rs232::setThreshold(Rs232::zeroCounts());
     Rs232::clearCounts();
     Acq::setSampleRate(rate);
     Acq::discard();
@@ -1077,8 +1253,30 @@ static void startUart(Lcd& tft) {
     g_found.uart = true;
     g_found.inverted = g_v.inverted;
     g_found.rateHz = Acq::sampleRate();
-    drawBusy(tft, "reading line");
+    g_traffic = false;
+    g_waitT0 = millis();
+    if (g_idleWait) drawWaiting(tft);
+    else            drawBusy(tft, "reading line");
     settleThen(P_UART);
+}
+
+// A steady result. On RS232 at mark, read it as a serial line all the same
+// and wait for traffic (IDLE_WAIT_MS); anything else is said at once.
+static void finishSteady(Lcd& tft) {
+    if (!g_f.active && !g_v.lin && g_f.meanMv <= -3000 && g_f.meanMv >= -15000) {
+        strcpy(g_v.name, "RS232");
+        g_v.info[0] = 0;
+        g_v.note = "";
+        g_v.showLevel = false;
+        g_v.uart = true;
+        g_v.inverted = true;
+        g_v.zeroCross = true;
+        g_v.retry = false;
+        g_idleWait = true;
+        startUart(tft);
+        return;
+    }
+    finish(tft);
 }
 
 static void startUart(Lcd& tft);
@@ -1104,6 +1302,15 @@ static void finishUart(Lcd& tft) {
         finish(tft);
         return;
     }
+    if (g_at9600) {                             // the try at 9600: taken only if the frames hold
+        uint32_t good = g_decided ? st.bytes - g_b0 : 0, bad = st.framingErrors + st.parityErrors;
+        if (!(g_decided && good + bad >= 8 && good * 10 >= (good + bad) * 9)) {
+            g_rxN = 0; g_rx[0] = 0; g_txtN = 0; g_txtNew = false;
+            mbReset();
+            startUart(tft);                     // not 9600: worked out from the line
+            return;
+        }
+    }
     if (!g_decided && g_v.retry && !g_retried) {   // nothing read: the other way up, once
         g_retried = true;
         g_v.inverted = !g_v.inverted;
@@ -1122,6 +1329,21 @@ static void finishUart(Lcd& tft) {
         g_scored = good + bad;
         g_score = g_scored ? (uint8_t)(good * 100 / g_scored) : 0;
     }
+    // RS232 and TTL serial are the standard speeds only. Anything else that
+    // reads as frames is something else: a square wave is alternating bits at
+    // twice its frequency (the 1 kHz calibration output was "2000 baud 7E1
+    // 100%", 2026-11-07).
+    bool odd = g_found.baud && !Rs232::isStandard(g_found.baud);
+    if (odd && (g_f.square || squareInWave(g_f))) {
+        namePwm(g_f, g_v);
+        g_v.note = "";
+        g_v.uart = false;
+        g_found.baud = 0;
+        g_found.uart = false;
+        finish(tft);
+        return;
+    }
+    if (odd) g_score = 0;                       // learnt again like any bad reading, then not serial
     // A good line read badly once in a while: learning that starts in the
     // middle of a burst can take a wrong start bit and settle on a frame
     // that does not hold (60..76 % on clean RS232 at 19200 and 115200, about
@@ -1136,7 +1358,8 @@ static void finishUart(Lcd& tft) {
     // Frames that hold only now and then are not a serial line: a data line
     // read as one finds 'frames' too (83..93 % on the demo I2C lines).
     if (g_found.baud && g_score < 90) {
-        snprintf(g_v.info, sizeof(g_v.info), "not serial: %u%% fit", g_score);
+        if (odd) strcpy(g_v.info, "not serial");
+        else     snprintf(g_v.info, sizeof(g_v.info), "not serial: %u%% fit", g_score);
         g_found.baud = 0;
         g_found.uart = false;
         if (!g_v.note[0]) g_v.note = "I2C SDA, SPI, or a GPIO?";
@@ -1160,7 +1383,12 @@ static bool changed(bool& activity) {
     bool quiet = (int32_t)(hi - lo) < g_need;
     int32_t loMv = toMv(lo), hiMv = toMv(hi), meanMv = toMv((int32_t)(sum / n));
     if (!g_f.active) {
-        if (!quiet) { activity = true; return true; }
+        // A serial line read from rest (its levels are those of the rest):
+        // traffic on it is the line talking, not another line. Taken for
+        // another (v0.19), every message of a line that talks now and then
+        // started it all again, and the result was gone in a few tenths of a
+        // second.
+        if (!quiet) { activity = true; return !g_found.uart; }
         int32_t d = meanMv - g_f.meanMv, a = g_f.meanMv < 0 ? -g_f.meanMv : g_f.meanMv;
         int32_t tol = a / 10 > 300 ? a / 10 : 300;
         return d > tol || d < -tol;
@@ -1221,7 +1449,7 @@ static void step(Lcd& tft) {
                 g_thr  = (uint16_t)((lo + hi) / 2);
                 g_hyst = (uint16_t)(span / 6 > 48 ? span / 6 : 48);
                 g_f.active = span >= need;
-                if (quick) { classify(); finish(tft); break; }
+                if (quick) { classify(); finishSteady(tft); break; }
                 startPhase(P_EDGES);
             }
             break;
@@ -1242,11 +1470,28 @@ static void step(Lcd& tft) {
                 Acq::resume();
                 classify();
                 if (g_v.uart) startUart(tft);
-                else finish(tft);
+                else finishSteady(tft);
             }
             break;
         case P_UART: {
             Rs232::Format fm = Rs232::format();
+            if (g_idleWait && !g_traffic) {
+                Rs232::Stats ws = Rs232::stats();
+                if (ws.bytes + ws.framingErrors + ws.parityErrors) {
+                    g_traffic = true;           // the timing of this try counts from here
+                    g_t0 = now;
+                    dt = 0;
+                } else if (now - g_waitT0 < IDLE_WAIT_MS) {
+                    g_t0 = now;                 // nothing yet: keep waiting
+                    break;
+                } else {                        // a minute and nothing: as it was
+                    g_idleWait = false;
+                    g_found = Found();
+                    classify();
+                    finish(tft);
+                    break;
+                }
+            }
             if (fm.decided && !g_decided) {
                 g_decided = true;
                 g_b0 = Rs232::stats().bytes;
@@ -1254,8 +1499,10 @@ static void step(Lcd& tft) {
             }
             uint32_t frames = g_decided ? Rs232::stats().bytes - g_b0 : 0;
             if (g_v.lin) frames = g_linHeaders >= 20 ? UART_FRAMES : 0;    // LIN: twenty headers
-            if ((g_decided && (frames >= UART_FRAMES || now - g_tDecided >= UART_MORE_MS))
-                || (!g_decided && dt >= UART_LEARN_MS))
+            // the try at 9600 is kept short: a line at another speed should not wait on it
+            uint32_t learnMs = g_at9600 ? 1500 : UART_LEARN_MS, moreMs = g_at9600 ? 1000 : UART_MORE_MS;
+            if ((g_decided && (frames >= UART_FRAMES || now - g_tDecided >= moreMs))
+                || (!g_decided && dt >= learnMs))
                 finishUart(tft);
             break;
         }
@@ -1824,6 +2071,7 @@ static void takeRx(Lcd& tft) {
         if (g_txtN == sizeof(g_txt)) { memmove(g_txt, g_txt + 1, sizeof(g_txt) - 1); g_txtN--; }
         g_txt[g_txtN++] = (char)c;
         g_txtNew = true;
+        linesAdd((char)c);
         mbByte((uint8_t)c);
         if (g_phase == P_DONE) Link::rx((uint8_t)c, "insp");      // once the result is up: before, the frame may be guessed wrong
         any = true;
@@ -1835,6 +2083,10 @@ static void takeRx(Lcd& tft) {
     if (g_txtNew && g_phase == P_DONE && !g_teach && showChars() && millis() - charsMs >= 200) {
         charsMs = millis();
         drawChars(tft);
+    }
+    if (g_linesNew && g_phase == P_DONE && !g_teach && showLines() && millis() - charsMs >= 200) {
+        charsMs = millis();
+        drawLines(tft, false);
     }
 }
 
@@ -1875,7 +2127,7 @@ uint8_t poll(Lcd& tft) {
     if (Keys::hit(Keys::RUN)) {
         if (g_teach == T_MODBUS) drawTeach(tft);            // the latest frame
         else if (g_teach) { g_capDone = false; g_capMs = millis(); drawn = false; teachBar(tft, "catching one..."); }
-        else begin(tft);
+        else { linesClear(); begin(tft); }
     }
     int8_t d = Config::demo ? (Keys::hit(Keys::RIGHT) ? 1 : Keys::hit(Keys::LEFT) ? -1 : 0) : 0;
     if (d && g_teach == T_UART) {                       // another character of the message
@@ -1885,14 +2137,26 @@ uint8_t poll(Lcd& tft) {
         begin(tft);
     }
     if (Keys::hit(Keys::MODE) && g_phase == P_DONE && !g_teach && readUart()) {
-        g_charsView = !g_charsView;
-        if (g_charsView) drawChars(tft);
-        else drawWave(tft);
+        g_view = (uint8_t)((g_view + 1) % NVIEW);         // boxes, picture, lines
+        if (g_view == VIEW_BOXES)      drawChars(tft);
+        else if (g_view == VIEW_LINES) drawLines(tft, true);
+        else                           drawWave(tft);
     }
     if (Keys::hit(Keys::DOWN) && g_phase == P_DONE && !g_teach && healthy()) return TESTER_HEALTH;
     uint8_t ok = Keys::press(Keys::OK);
     if (ok == Keys::LONG) return MENU;
-    if (ok == Keys::SHORT && g_phase == P_DONE && !g_teach && g_found.uart && !Config::demo) return TESTER;
+    // OK: the tester, whatever is on the screen (v0.19: a line that talks now
+    // and then is seldom on a serial result when a hand is free). With nothing found, on AUTO, at the fastest rate (the
+    // tester comes down by itself), the way up taken from where it rests.
+    if (ok == Keys::SHORT && !g_teach && !Config::demo) {
+        if (!readUart()) {
+            g_found.uart = false;
+            g_found.baud = 0;
+            g_found.inverted = g_v.uart ? g_v.inverted : g_f.meanMv < 0;
+            g_found.rateHz = UART_RATES[sizeof(UART_RATES) / sizeof(UART_RATES[0]) - 1];
+        }
+        return TESTER;
+    }
     return STAY;
 }
 

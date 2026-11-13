@@ -29,11 +29,14 @@ More pictures in [`docs/screens`](docs/screens).
 
 - **AprecID** (first in the menu): what is on the probe.
   - Steady levels: GND, 3.3V, 5V, 12V, 24V, RS232 at rest.
-  - Serial lines: RS232 or TTL, 1200 to 115200 baud, the frame (7 or 8 data bits, parity, stop
-    bits), how many frames fitted, and the text read. The last five characters in boxes (CR and LF
-    in green), or the waveform.
-  - Modbus RTU, RS485 (A and B wires), CAN (H and L), I2C (SCL), LIN, PWM, each with details on
-    AUTO.
+  - Serial lines: RS232 or TTL, at the standard speeds from 1200 to 115200 baud (9600 tried
+    first), the frame (7 or 8 data bits, parity, stop bits), how many frames fitted, and the text
+    read. MODE shows the last five characters in boxes (CR and LF in green), the waveform, or the
+    last messages a line each, with the time between them.
+  - An RS232 line at rest is waited on for up to a minute, so a device that sends a message only
+    now and then is still read.
+  - Modbus RTU, RS485 (A and B wires), CAN (H and L), I2C (SCL), LIN, PWM (a square wave at a
+    rate that is no standard speed is named PWM, not serial), each with details on AUTO.
   - **Hands-off** (Settings): the line is watched and recognised again when it changes, with a
     beep at each result.
 - **RS232 Tester:**
@@ -47,12 +50,13 @@ More pictures in [`docs/screens`](docs/screens).
     - bus health: levels, bit rate, rise and fall times and jitter against the EIA-232 limits;
     - large: the last characters in big type;
     - hex;
-    - characters.
-  - **SNAP** waits for the first start bit and keeps the message, so that the first exchange on a
-    line can be looked at.
+    - characters: a line for each message, with the time since the one before.
+  - **SNAP** waits for the first start bit and keeps the message (up to 128 characters), so that
+    the first exchange on a line can be looked at; then it waits for the next one by itself.
 - **Settings**, kept in flash: colour theme (ten of them, Halloween and Xmas among them), auto off
   (off, 10 or 30 minutes), hands-off, what it starts on (AprecID, the menu, or a demo on made-up
-  lines), and erasing the tester's buffer.
+  lines), what the calibration terminal puts out (the 1 kHz square wave, a TTL 9600 8N1 test
+  message to try the probe on, or nothing), and erasing the tester's buffer.
 - **USB:** the instrument's own USB socket is a serial port (USB CDC). The results go to the
   [apre page](https://zeromem0.github.io/apre/) in a browser, or to the apre Android app.
 
@@ -80,15 +84,15 @@ OK is the wheel pressed; ◄ ► are the wheel turned.
 | ▲ ▼, OK or RUN | short | Menu: AprecID, RS232 Tester, Settings |
 | AUTO | held | Menu: About |
 
-In **AprecID**: RUN looks again; MODE switches the characters in boxes and the waveform; AUTO
-shows the details, where there are any; ▼ opens bus health and OK the tester, on the line just
-found.
+In **AprecID**: RUN looks again; MODE goes through the characters in boxes, the waveform and the
+messages a line each; AUTO shows the details, where there are any; ▼ opens bus health; OK opens
+the tester, on the line just found, whatever is on the screen.
 
 In the **RS232 Tester**:
 
 | Button | Press | What it does |
 |---|---|---|
-| RUN | short | `RUN` → `HOLD` → capture (`WAIT`, then `SNAP`); in `WAIT`, back to `RUN` |
+| RUN | short | `RUN` → `HOLD` → capture (`WAIT`, then `SNAP`, then `WAIT` again by itself); in `WAIT`, back to `RUN` |
 | MODE | short | View: protocol → single character → bus health → large → hex → characters; opened from AprecID, after the last view back to AprecID |
 | MODE | held | In `WAIT` only: a simulated message, received as if from the line |
 | ◄ ► | short | Range down / up |
@@ -115,7 +119,7 @@ FNIRSI USB update. It needs Python 3; nothing else.
 With the V2.2.1 application from FNIRSI (the `.zip`, or the `APP_*.bin` in it):
 
 ```
-python tools/make_update.py DSO-510_V2.2.1.zip bin/APRE-510_v0.11.bin
+python tools/make_update.py DSO-510_V2.2.1.zip bin/APRE-510_v0.21.bin
 ```
 
 or, after a build of your own (see below), with that build:
@@ -179,4 +183,5 @@ is read-protected, and the only way in is the FNIRSI update.
   PD2 (`src/app/Keys.h`).
 
 Real RS232 lines have been recognised at 1200 through 115200 baud, 8N1, 8E1 and 8O1, and Modbus
-RTU at 9600 8E1, with the verdict over USB in under 4 seconds.
+RTU at 9600 8E1, with the verdict over USB in under 4 seconds. A line that sends a message every half
+minute is read at each message.

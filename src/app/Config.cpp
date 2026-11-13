@@ -27,6 +27,7 @@ static const uint16_t BLOCK[NBLOCK] = { 0, 64, 256, 1024 };
 static const uint8_t     AUTOOFF_MIN[NAUTOOFF]  = { 0, 10, 30 };
 static const char* const AUTOOFF_NAME[NAUTOOFF] = { "off", "10 min", "30 min" };
 static const char* const START_NAME[NSTART]     = { "AprecID", "Menu", "Demo" };
+static const char* const CAL_NAME[NCAL]         = { "1 kHz", "TTL 9600", "off" };
 
 uint8_t format  = Export::DUMP;
 uint8_t block   = 0;
@@ -38,6 +39,7 @@ bool    demo    = true;
 bool    demo    = false;
 #endif
 bool    handsOff = true;
+uint8_t calOut  = CAL_1K;
 
 uint16_t blockSizeAt(uint8_t i) { return i < NBLOCK ? BLOCK[i] : 0; }
 uint16_t blockSize() { return blockSizeAt(block); }
@@ -45,14 +47,15 @@ uint16_t blockSize() { return blockSizeAt(block); }
 uint32_t autoOffMs() { return autoOff < NAUTOOFF ? AUTOOFF_MIN[autoOff] * 60000ul : 0; }
 const char* autoOffName(uint8_t i) { return i < NAUTOOFF ? AUTOOFF_NAME[i] : "?"; }
 const char* startupName(uint8_t i) { return i < NSTART ? START_NAME[i] : "?"; }
+const char* calOutName(uint8_t i) { return i < NCAL ? CAL_NAME[i] : "?"; }
 
 static const uint32_t PAGE  = 0x080FF800u;
 static const uint32_t MAGIC = 0x30313543u;          // "C510"
 
-// theme, format, block, auto-off, hands-off, startup, a byte each
+// theme, format, block, auto-off, hands-off, startup, the calibration output, a byte each
 static void pack(uint32_t rec[4]) {
     uint32_t a = (uint32_t)Theme::idx | (uint32_t)format << 8 | (uint32_t)block << 16 | (uint32_t)autoOff << 24;
-    uint32_t b = (uint32_t)(handsOff ? 1 : 0) | (uint32_t)startup << 8;
+    uint32_t b = (uint32_t)(handsOff ? 1 : 0) | (uint32_t)startup << 8 | (uint32_t)calOut << 16;
     rec[0] = MAGIC;
     rec[1] = a;
     rec[2] = b;
@@ -112,13 +115,14 @@ void load() {
     uint32_t a = p[1], b = p[2];
     if (p[0] != MAGIC || p[3] != ~(MAGIC + a + b * 3u)) return;         // nothing kept
     uint8_t th = a & 0xFF, fm = (a >> 8) & 0xFF, bl = (a >> 16) & 0xFF, ao = a >> 24;
-    uint8_t ho = b & 0xFF, st = (b >> 8) & 0xFF;
+    uint8_t ho = b & 0xFF, st = (b >> 8) & 0xFF, co = (b >> 16) & 0xFF;
     if (th < Theme::count())  Theme::idx = th;
     if (fm < Export::NFMT)    format = fm;
     if (bl < NBLOCK)          block = bl;
     if (ao < NAUTOOFF)        autoOff = ao;
     handsOff = ho != 0;
     if (st < NSTART)          startup = st;
+    if (co < NCAL)            calOut = co;
 #endif
 #ifndef DEMO_SIGNAL
     demo = startup == START_DEMO;

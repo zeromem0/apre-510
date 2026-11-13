@@ -34,6 +34,13 @@ extern bool demo;
 // hand off the board for RUN. On at start.
 extern bool handsOff;
 
+// The calibration output (CalOut.cpp): the 1 kHz square wave, a test line,
+// or nothing. The square wave is first: a record kept by an older version
+// has 0 here.
+enum { CAL_1K, CAL_TTL, CAL_OFF, NCAL };
+extern uint8_t calOut;
+const char* calOutName(uint8_t i);
+
 const uint8_t NBLOCK = 4;
 const uint8_t NAUTOOFF = 3;
 uint32_t autoOffMs();           // 0: never

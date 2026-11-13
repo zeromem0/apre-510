@@ -62,6 +62,7 @@ static bool     g_assumed;
 
 // Not zero: this speed, 8N1, and none of the learning below takes part.
 static uint32_t g_fixedBaud = 9600;
+static bool     g_fixedLearn;       // ... but the frame is learnt all the same
 
 // --- frame shape ----------------------------------------------------------
 // Every candidate, in the order they are preferred when more than one still
@@ -87,6 +88,9 @@ static uint8_t  g_chkN, g_chkBad;           // frames since the last check, and 
 static uint8_t  g_framesSeen;               // frames since learning began
 static bool     g_decided;
 static uint8_t  g_fmtIdx;
+static bool     g_pend;                     // a frame the window was too short for (finishFrame())
+static uint16_t g_pendBits;
+static uint8_t  g_pendN;
 
 // --- frame assembly -------------------------------------------------------
 static bool     g_inFrame;                  // between a start bit and the end of its frame
@@ -142,6 +146,7 @@ T232_RAM static void pushByte(uint16_t b) {
 void begin() { reset(); }
 
 static void relearnFormat() {
+    g_pend = false;
     g_alive = (uint16_t)((1u << NCAND) - 1u);
     g_framesSeen = 0; g_decided = false; g_fmtIdx = 5;   // 8N1 until shown otherwise
     g_wantBits = 9;      // 8N1 and 7E1 both, the usual two
@@ -156,7 +161,10 @@ static void relearn() {
     relearnFormat();
     g_inFrame = false; g_frameBitN = 0; g_frameBits = 0; g_frameStart = -1;
 
-    if (g_fixedBaud) {
+    if (g_fixedBaud && g_fixedLearn) {
+        g_locked   = true;
+        g_baud     = g_fixedBaud;           // the bit time follows in feed()
+    } else if (g_fixedBaud) {
         g_fmtIdx   = 5;                     // 8N1
         g_alive    = (uint16_t)(1u << 5);
         g_framesSeen     = LEARN_FRAMES;
@@ -167,7 +175,11 @@ static void relearn() {
     }
 }
 
-void     setFixedBaud(uint32_t baud) { g_fixedBaud = baud; }
+void     setFixedBaud(uint32_t baud, bool learnFrame) { g_fixedBaud = baud; g_fixedLearn = baud && learnFrame; }
+bool     isStandard(uint32_t baud) {
+    for (uint8_t i = 0; i < sizeof(STD_BAUD) / sizeof(STD_BAUD[0]); i++) if (STD_BAUD[i] == baud) return true;
+    return false;
+}
 uint32_t fixedBaud() { return g_fixedBaud; }
 
 void reset() {
@@ -292,15 +304,40 @@ T232_RAM static int16_t tryCand(const Cand& c, uint16_t bits, uint8_t have) {
     return (int16_t)data;
 }
 
+// While the shape is being learnt a frame is read with a window for the
+// shortest shapes still standing (9 bits at first: 8N1, 7E1). On 8E1 a
+// character whose parity bit is 0 fits none of them, and it was lost (on 8E1
+// "<" and "e", on 8O1 ">"). Such a frame is kept instead, and read again with
+// the shape the next frame holds to, as far as its bits go (a model of this
+// on the PC gave the whole text on 8N1, 8E1, 8O1, 7E1 and 8N2).
+
+T232_RAM static int16_t tryCandPartial(const Cand& c, uint16_t bits, uint8_t have) {
+    if (have < c.data) return -1;
+    uint8_t data = 0, ones = 0;
+    for (uint8_t i = 0; i < c.data; i++)
+        if (bits & (1u << i)) { data |= (uint8_t)(1u << i); ones++; }
+    uint8_t at = c.data;
+    if (c.par && at < have) {
+        if (bits & (1u << at)) ones++;
+        if (c.par == 1 && (ones & 1)) return -1;
+        if (c.par == 2 && !(ones & 1)) return -1;
+    }
+    if (c.par) at++;
+    for (uint8_t i = 0; i < c.stop && at + i < have; i++)
+        if (!(bits & (1u << (at + i)))) return -1;
+    return (int16_t)data;
+}
+
 T232_RAM static void finishFrame() {
     if (!g_decided) {
         // strike out every candidate this character contradicts
         // A candidate longer than what was captured is neither confirmed nor
         // struck out: there is nothing to judge it on yet.
+        bool longer = false;                 // shapes alive that this window cannot judge
         uint16_t still = 0;
         for (uint8_t i = 0; i < NCAND; i++) {
             if (!(g_alive & (1u << i))) continue;
-            if (candBits(CAND[i]) > g_frameBitN) { still |= (uint16_t)(1u << i); continue; }
+            if (candBits(CAND[i]) > g_frameBitN) { still |= (uint16_t)(1u << i); longer = true; continue; }
             if (tryCand(CAND[i], g_frameBits, g_frameBitN) >= 0) still |= (uint16_t)(1u << i);
         }
         if (still) g_alive = still;          // never strike them all out
@@ -326,13 +363,27 @@ T232_RAM static void finishFrame() {
         int16_t v = (candBits(CAND[g_fmtIdx]) <= g_frameBitN)
                   ? tryCand(CAND[g_fmtIdx], g_frameBits, g_frameBitN) : -1;
         if (v >= 0) {
+            if (g_pend) {                    // the first frame, read with this shape as far as it goes
+                int16_t pv = tryCandPartial(CAND[g_fmtIdx], g_pendBits, g_pendN);
+                if (pv >= 0) pushByte((uint8_t)pv);
+                else         g_ferr++;
+                g_pend = false;
+            }
             pushByte((uint8_t)v);
             if (g_frameStart >= 0 && g_byteN < BYTES_MAX) {
                 g_byteAt[g_byteN]  = (uint16_t)g_frameStart;
                 g_byteVal[g_byteN] = (uint8_t)v;
                 g_byteN++;
             }
+        } else if (longer) {
+            // too short a window for a shape still standing: kept for the next
+            // frame (the one kept before, if any, was not a character)
+            if (g_pend) g_ferr++;
+            g_pend = true;
+            g_pendBits = g_frameBits;
+            g_pendN = g_frameBitN;
         } else {
+            if (g_pend) { g_pend = false; g_ferr++; }   // two in a row: neither is a character
             g_ferr++;
         }
 
@@ -382,7 +433,7 @@ T232_RAM static void finishFrame() {
         // shape that goes on failing half the time is thrown out and worked
         // out again from what is actually arriving.
         if (++g_chkN >= 16) {
-            if (g_chkBad >= 8 && !g_fixedBaud) relearnFormat();
+            if (g_chkBad >= 8 && (!g_fixedBaud || g_fixedLearn)) relearnFormat();
             g_chkN = 0; g_chkBad = 0;
         }
     }

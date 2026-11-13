@@ -4,14 +4,17 @@
 #include "Keys.h"
 #include "Config.h"
 #include "Export.h"
+#include "CalOut.h"
 
 namespace Settings {
 
 #ifdef NO_USB_SENDER
 // Export and Block are the USB Sender's: left out with it (kept in the saved
 // record all the same, which stays as in the other builds).
-enum { ROW_THEME, ROW_AUTOOFF, ROW_HANDS, ROW_START, ROW_BUFFER, NROW };
-static const char* const LABEL[NROW] = { "Theme", "Auto off", "Hands-off", "Startup", "Buffer" };
+// The calibration output has its row here only: with Export and Block there
+// are seven rows already, all that fit above the note.
+enum { ROW_THEME, ROW_AUTOOFF, ROW_HANDS, ROW_START, ROW_CAL, ROW_BUFFER, NROW };
+static const char* const LABEL[NROW] = { "Theme", "Auto off", "Hands-off", "Startup", "Cal out", "Buffer" };
 #else
 enum { ROW_THEME, ROW_FORMAT, ROW_BLOCK, ROW_AUTOOFF, ROW_HANDS, ROW_START, ROW_BUFFER, NROW };
 static const char* const LABEL[NROW] = { "Theme", "Export", "Block", "Auto off", "Hands-off", "Startup", "Buffer" };
@@ -62,6 +65,11 @@ static void drawRow(Lcd& tft, uint8_t r) {
         case ROW_START:
             tft.print(Config::startupName(Config::startup));
             break;
+#ifdef NO_USB_SENDER
+        case ROW_CAL:
+            tft.print(Config::calOutName(Config::calOut));
+            break;
+#endif
         case ROW_BUFFER:
             tft.print(g_len); tft.print(" bytes");
             break;
@@ -128,6 +136,21 @@ static void drawNote(Lcd& tft) {
                 tft.print("with the other settings");
             }
             break;
+#ifdef NO_USB_SENDER
+        case ROW_CAL:
+            if (Config::calOut == Config::CAL_TTL) {
+                tft.print("the calibration output: a test line for the");
+                tft.setCursor(ROW_X + 6, NOTE_Y + 14);
+                tft.print("probe, TTL 3.3V 9600 8N1, a text over and over");
+            } else if (Config::calOut == Config::CAL_1K) {
+                tft.print("the calibration output: a square wave,");
+                tft.setCursor(ROW_X + 6, NOTE_Y + 14);
+                tft.print("1 kHz, 3.3V");
+            } else {
+                tft.print("the calibration output: nothing on it");
+            }
+            break;
+#endif
         case ROW_BUFFER:
             if (g_erased) {
                 tft.setTextColor(TH.err, TH.bg);
@@ -198,11 +221,17 @@ static void step(int8_t d) {
         case ROW_AUTOOFF: v = &Config::autoOff; n = Config::NAUTOOFF; break;
         case ROW_HANDS:  Config::handsOff = !Config::handsOff; return;
         case ROW_START:  v = &Config::startup; n = Config::NSTART;   break;
+#ifdef NO_USB_SENDER
+        case ROW_CAL:    v = &Config::calOut;  n = Config::NCAL;     break;
+#endif
         default:         return;            // the buffer row has no values
     }
     *v = (uint8_t)((*v + n + d) % n);
 #ifndef DEMO_SIGNAL
     if (g_row == ROW_START) Config::demo = Config::startup == Config::START_DEMO;
+#endif
+#ifdef NO_USB_SENDER
+    if (g_row == ROW_CAL) CalOut::apply();      // at once: it can be probed from this page
 #endif
 }
 

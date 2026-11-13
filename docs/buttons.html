@@ -36,7 +36,7 @@
 <body>
 <main>
 
-<h1>Power <small>DSO-510, APRE-510 v0.11, next to the FNIRSI firmware V2.2.1</small></h1>
+<h1>Power <small>DSO-510, APRE-510 v0.21, next to the FNIRSI firmware V2.2.1</small></h1>
 <div class="frame"><div class="scroll">
 <table>
   <tr><th>Buttons</th><th>Press</th><th>What it does</th></tr>
@@ -52,11 +52,11 @@
 <table>
   <tr><th>Button</th><th>Press</th><th>Menu</th><th>AprecID</th><th>RS232 Tester</th><th>Settings</th></tr>
   <tr><td class="b">◄ ►<small>wheel</small></td><td class="op">short</td><td>/</td><td>Demo only: another made-up signal</td><td>Range: R0 … R9</td><td>The value</td></tr>
-  <tr><td class="b" rowspan="2">OK<small>wheel pressed</small></td><td class="op">short</td><td>Start the chosen one</td><td>On a serial line: into the tester, on it</td><td><code>RS232</code> ↔ <code>TTL</code></td><td>Save and back to the menu</td></tr>
+  <tr><td class="b" rowspan="2">OK<small>wheel pressed</small></td><td class="op">short</td><td>Start the chosen one</td><td>Into the tester, on the line found (on <code>A</code>)</td><td><code>RS232</code> ↔ <code>TTL</code></td><td>Save and back to the menu</td></tr>
   <tr><td class="op">held</td><td>/</td><td colspan="2" class="w"><b>Back to the menu</b></td><td>/</td></tr>
   <tr><td class="b" rowspan="2">AUTO</td><td class="op">short</td><td>/</td><td>Details (see below)</td><td>Speed: 9600 → 19200 → <code>A</code></td><td>/</td></tr>
   <tr><td class="op">held</td><td>About</td><td>/</td><td>Single character view: threshold to the middle</td><td>On Buffer: empties it</td></tr>
-  <tr><td class="b" rowspan="2">MODE</td><td class="op">short</td><td>/</td><td>Text in boxes ↔ waveform</td><td>Next view; after the last, back to AprecID (if entered from there)</td><td>Save and back to the menu</td></tr>
+  <tr><td class="b" rowspan="2">MODE</td><td class="op">short</td><td>/</td><td>Text in boxes → waveform → messages a line each</td><td>Next view; after the last, back to AprecID (if entered from there)</td><td>Save and back to the menu</td></tr>
   <tr><td class="op">held</td><td>/</td><td>/</td><td>In <code>WAIT</code>: a simulated message</td><td>/</td></tr>
   <tr><td class="b">▲</td><td class="op">short</td><td>Choice up</td><td>/</td><td>Sample rate up</td><td>Row up</td></tr>
   <tr><td class="b">▼</td><td class="op">short</td><td>Choice down</td><td>On RS232/TTL: bus health, in the tester</td><td>Sample rate down</td><td>Row down</td></tr>
@@ -74,22 +74,22 @@
   <tr><td class="b">AUTO</td><td>Held: About, what AprecID recognises. Any button goes back to the menu.</td></tr>
 </table>
 </div></div>
-<p class="note">With Startup = AprecID (Settings), APRE-510 starts straight in AprecID, without the menu. At the bottom of the menu: the version, the clock (240 MHz) and the image check (“ok” or “BAD”).</p>
+<p class="note">After ten seconds without a button the mascot takes the plug's place on the left, blinking; any button brings the plug back and does what it does. With Startup = AprecID (Settings), APRE-510 starts straight in AprecID, without the menu. At the bottom of the menu: the version, the clock (240 MHz) and the image check (“ok” or “BAD”).</p>
 
 <h1>AprecID <small>what is on the probe</small></h1>
 <div class="frame"><div class="scroll">
 <table>
   <tr><th>Button</th><th>Press</th><th>What it does</th></tr>
   <tr><td class="b">RUN</td><td class="op">short</td><td>Recognise again, from the start</td></tr>
-  <tr><td class="b">MODE</td><td class="op">short</td><td>On RS232/TTL with the speed found: the last 5 characters in boxes (CR, LF in green) ↔ the waveform. Kept after RUN.</td></tr>
+  <tr><td class="b">MODE</td><td class="op">short</td><td>On RS232/TTL with the speed found: the last 5 characters in boxes (CR, LF in green) → the waveform → the last six messages, a line each, with the time since the one before (<code>+30.1s</code>). Kept after RUN.</td></tr>
   <tr><td class="b">AUTO</td><td class="op">short</td><td>Details, when the bottom line says “AUTO details”: PWM, CAN, I2C SCL, Modbus on their own screen (RUN catches another, AUTO goes back); on RS232/TTL the tester's single character view</td></tr>
   <tr><td class="b">▼</td><td class="op">short</td><td>On RS232/TTL with the speed found: bus health, in the tester</td></tr>
-  <tr><td class="b" rowspan="2">OK</td><td class="op">short</td><td>On a serial line: into the RS232 Tester, with the range, line type and speed found</td></tr>
+  <tr><td class="b" rowspan="2">OK</td><td class="op">short</td><td>Into the RS232 Tester, whatever is on the screen (even while it waits): with the range, line type and speed found; with nothing found, on <code>A</code>, at the top rate, coming down by itself</td></tr>
   <tr><td class="op">held</td><td class="w">Back to the menu</td></tr>
   <tr><td class="b">◄ ►</td><td class="op">short</td><td>Only with Startup = Demo: the next made-up signal (GND, 3.3V, 5V, RS232 9600, TTL 115200, PWM 1 kHz …)</td></tr>
 </table>
 </div></div>
-<p class="note">Top bar “watching” with Hands-off (Settings) on: the line is watched and recognised again by itself when it changes, with a beep at each result. The result also goes out over USB, to the apre page or the Android app.</p>
+<p class="note">Top bar “watching” with Hands-off (Settings) on: the line is watched and recognised again by itself when it changes, with a beep at each result. An RS232 line at rest is waited on for up to a minute (“RS232 idle, waiting for traffic”): a device that sends a message now and then is read when it does. RS232 and TTL serial are named at the standard speeds only (1200 … 230400); 9600 is tried first. A square wave at any other rate is named PWM. The result also goes out over USB, to the apre page or the Android app.</p>
 
 <h1>RS232 Tester <small>buttons</small></h1>
 <div class="frame"><div class="scroll">
@@ -104,11 +104,11 @@
   <tr><td class="op">held</td><td colspan="2" class="w">Back to the menu; the buffer is kept</td></tr>
   <tr><td class="b" rowspan="2">MODE</td><td class="op">short</td><td colspan="2">View: protocol → single character → bus health → large → hex → characters. <b>Entered from AprecID:</b> after characters, back to AprecID.</td></tr>
   <tr><td class="op">held</td><td>—</td><td class="w">Only in <code>WAIT</code>: a simulated message, as if it had come down the line</td></tr>
-  <tr><td class="b">RUN</td><td class="op">short</td><td>Freeze: <code>RUN</code> → <code>HOLD</code></td><td>From <code>HOLD</code>: arm a capture (<code>WAIT</code>). From <code>SNAP</code>: wait for the next capture.</td></tr>
+  <tr><td class="b">RUN</td><td class="op">short</td><td>Freeze: <code>RUN</code> → <code>HOLD</code></td><td>From <code>HOLD</code>: arm a capture (<code>WAIT</code>). Once a capture is shown it arms itself again; RUN while waiting: back to <code>RUN</code>.</td></tr>
   <tr><td class="b">POWER</td><td class="op">short</td><td colspan="2">Learn the speed and the frame again</td></tr>
 </table>
 </div></div>
-<p class="note">Single character view: ▲ ▼ move the threshold by hand, AUTO held puts it back in the middle of the levels; in <code>HOLD</code> or on a capture ◄ ► step through the characters instead of the range. Bus health view: RUN starts the figures again; it keeps its own rate (▲ ▼ do not change it).</p>
+<p class="note">Characters view: a line for each message (after LF, or where the line rested), CR and LF as dim arrows, the time since the one before at the right. Single character view: ▲ ▼ move the threshold by hand, AUTO held puts it back in the middle of the levels; in <code>HOLD</code> or on a capture ◄ ► step through the characters instead of the range. Bus health view: RUN starts the figures again; it keeps its own rate (▲ ▼ do not change it).</p>
 
 <h1>Which rate for which speed</h1>
 <div class="frame"><div class="scroll">
@@ -125,8 +125,8 @@
 <div class="frame"><div class="scroll">
 <table>
   <tr><th>Button</th><th>What it does</th></tr>
-  <tr><td class="b">▲ ▼</td><td>Choose the row: Theme, Auto off, Hands-off, Startup, Buffer</td></tr>
-  <tr><td class="b">◄ ►</td><td>Theme: Default, Light, eInk, Night, Phosphor, Bluesky, Orange, Gold, Halloween, Xmas. Auto off: off, 10 min, 30 min. Hands-off: on, off. Startup: AprecID, Menu, Demo. Values wrap around at the ends.</td></tr>
+  <tr><td class="b">▲ ▼</td><td>Choose the row: Theme, Auto off, Hands-off, Startup, Cal out, Buffer</td></tr>
+  <tr><td class="b">◄ ►</td><td>Theme: Default, Light, eInk, Night, Phosphor, Bluesky, Orange, Gold, Halloween, Xmas. Auto off: off, 10 min, 30 min. Hands-off: on, off. Startup: AprecID, Menu, Demo. Cal out (the calibration terminal): 1 kHz, a TTL 9600 8N1 test message, off; changed at once. Values wrap around at the ends.</td></tr>
   <tr><td class="b">AUTO</td><td>Held on the Buffer row: empties the tester's buffer (“ERASED”)</td></tr>
   <tr><td class="b">OK, RUN, MODE</td><td>Save to flash (only if something changed) and back to the menu; “NOT SAVED TO FLASH” if writing failed</td></tr>
 </table>
@@ -139,7 +139,7 @@
   <tr><td class="b"><code>RUN</code></td><td>Reads and displays continuously</td><td><code>HOLD</code></td></tr>
   <tr><td class="b"><code>HOLD</code></td><td>Screen frozen, no longer reading</td><td><code>WAIT</code></td></tr>
   <tr><td class="b"><code>WAIT</code></td><td>Waits for the first start bit. MODE held: the simulated message</td><td><code>RUN</code></td></tr>
-  <tr><td class="b"><code>SNAP</code></td><td>The first characters as a waveform with boxes; the whole message goes into the buffer and can be seen with MODE.</td><td><code>WAIT</code> (another capture)</td></tr>
+  <tr><td class="b"><code>SNAP</code></td><td>The first characters as a waveform with boxes; the whole message (up to 128 characters) goes into the buffer. Then it waits for the next message by itself, the picture kept until it comes (not in the single character view).</td><td><code>WAIT</code> (another capture)</td></tr>
 </table>
 </div></div>
 

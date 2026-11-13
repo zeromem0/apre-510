@@ -46,6 +46,10 @@
 #include "Version.h"
 #include "Beep.h"
 #include "Link.h"
+#include "CalOut.h"
+#ifdef ZX
+#include "../zx/Zx.h"
+#endif
 
 Lcd tft;
 
@@ -103,6 +107,10 @@ static uint8_t speedMode = SPEED_9600;
 
 
 
+// (Since v0.18 SNAP arms itself again once a picture is shown, but in the
+// teaching view: on a line that sends a message every half minute nobody has
+// a hand free for RUN. The picture stays until the next message replaces it;
+// the text of each is kept in the buffer, a line each in the text view.)
 // RUN steps through RUN, HOLD and SNAP. SNAP is a single shot: it waits for
 // the first start bit, keeps the samples from just before it for as long as
 // SNAP_CHARS characters take, and stops with them on the screen, so that a
@@ -123,7 +131,7 @@ static uint8_t speedMode = SPEED_9600;
 #define SNAP_SHOWN  4
 #define SNAP_TAIL   5       // the picture is full, the rest of the message is being read
 #define SNAP_CHARS      8
-#define SNAP_MAX_CHARS  32
+#define SNAP_MAX_CHARS  128     // a whole line of text with room over (was 32)
 #define SNAP_REST_MS    50
 static volatile uint8_t snap = SNAP_OFF;
 static uint32_t snapBytes0 = 0;     // the count of characters when the message began
@@ -394,9 +402,34 @@ static void autoRate() {
     updateStatusBar();
 }
 
+// Where the line rested before a character, and for how long: the text view
+// starts a line there and says the time. Kept for the last GAPS_MAX.
+#define GAP_MS    300
+#define GAPS_MAX  24
+static CharsGap gaps[GAPS_MAX];
+static uint8_t  gapN = 0;
+static uint32_t lastRxMs = 0;
+
+static void noteGap() {
+    uint32_t now = millis();
+    if (bufferIndex > 0 && lastRxMs && now - lastRxMs >= GAP_MS) {
+        if (gapN == GAPS_MAX) { memmove(gaps, gaps + 1, sizeof(gaps) - sizeof(gaps[0])); gapN--; }
+        gaps[gapN].at = bufferIndex;
+        gaps[gapN].ms = now - lastRxMs;
+        gapN++;
+    }
+    lastRxMs = now;
+}
+
 static void compactBuffer() {
     const int keep = BUFFER_SIZE / 2;
     memmove(dataBuffer, dataBuffer + bufferIndex - keep, keep);
+    int shift = bufferIndex - keep;
+    uint8_t k = 0;
+    for (uint8_t i = 0; i < gapN; i++)
+        if (gaps[i].at - shift > 0) { gaps[k] = gaps[i]; gaps[k].at -= shift; k++; }
+    gapN = k;
+    lastDisplayedLines = 0;             // every row of the text view has moved
     bufferIndex = keep;
     dataBuffer[bufferIndex] = 0;
     lastBufferIndex = 0;
@@ -408,6 +441,7 @@ static void drainDecoder() {
     while ((c = Rs232::read()) >= 0) {
         if (c > 0xFF) continue;                 // a LIN break: only the inspector asks for those
         if (bufferIndex >= BUFFER_SIZE - 1) compactBuffer();
+        noteGap();
         dataBuffer[bufferIndex++] = (char)c;
         dataBuffer[bufferIndex] = 0;
         Link::rx((uint8_t)c, "tester");
@@ -415,6 +449,11 @@ static void drainDecoder() {
 }
 
 static void updateTextMode(bool hex) {
+    if (!hex) {                         // the text: a line for each message, under a rule
+        displayCharsLines(tft, dataBuffer, bufferIndex, gaps, gapN, lastDisplayedLines == 0);
+        lastDisplayedLines = 1;
+        return;
+    }
     const int perLine  = hex ? HEX_PER_LINE  : CHARS_PER_LINE;
     const int visLines = hex ? HEX_VIS_LINES : CHARS_VIS_LINES;
     const int lineH    = hex ? HEX_LINE_H    : CHARS_LINE_H;
@@ -470,7 +509,23 @@ static void eraseBuffer() {
     dataBuffer[0] = 0;
     lastBufferIndex = 0;
     lastDisplayedLines = 0;
+    gapN = 0;
     scrollFirstLine = -1;
+}
+
+// The same, with the picture left on the screen until the next one comes.
+static void rearmSnap() {
+    Acq::pause();
+    if (relearnPending) { Rs232::reset(); relearnPending = false; }
+#ifndef DEMO_SIGNAL
+    wantSnap = false; snapReady = false;
+#endif
+    snap    = SNAP_ARMED;
+    snapBytes0 = Rs232::stats().bytes;
+    snapRest   = 0;
+    running = true;
+    Acq::resume();
+    updateStatusBar();
 }
 
 static void armSnap() {
@@ -897,12 +952,22 @@ static bool command(const char* what, const char* line) {
     return false;
 }
 
+#if defined(ZX) && !defined(RAM_RUN)
+static void powerOff();
+#endif
+
 void setup() {
     // PD3, the power hold (the DSO-152's PC10, the DST-210's PA3), is set
     // high in SystemClock_Config (src/hw/Probe.cpp), before anything else.
     stage(100);
     Pins::begin();
     Keys::begin();
+#if defined(ZX) && !defined(RAM_RUN)
+    // RUN brought the tester in; DOWN held with it asks for the Spectrum
+    // (src/zx). Read now, used once the keys are let go and the clock is up.
+    delay(2);
+    bool zx = Keys::down(Keys::DOWN);
+#endif
 
     Config::load();                     // the theme, before anything is drawn
     stage(101);
@@ -947,6 +1012,10 @@ void setup() {
     }
     uint8_t clk = clock240();
     tft.backlight(60);                  // its PWM counts from the clock
+    CalOut::apply();                    // on the backlight's timer, or its own: after the clock
+#if defined(ZX) && !defined(RAM_RUN)
+    if (zx) Zx::run(tft, powerOff);     // never returns
+#endif
     Acq::setSampleRate(RATES[rateIdx]);
 #ifndef RAM_RUN
     uint32_t crc = 0;
@@ -1293,5 +1362,10 @@ static bool testerLoop() {
     autoRate();
     updateDisplay();
     refreshStatusBar();
+
+    // A picture is up and has been drawn with the text it brought: wait for
+    // the next message at once (not in the teaching view, where one character
+    // of the picture is being looked at).
+    if (snap == SNAP_SHOWN && displayMode != MODE_TEACH) rearmSnap();
     return true;
 }

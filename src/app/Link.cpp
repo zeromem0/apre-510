@@ -230,8 +230,12 @@ void wave(const uint16_t* s, uint16_t n, uint32_t hz, const char* src, const cha
 // (some 30 ms) into the RAM above the 64 kB the build knows of: the AT32 has
 // 224 kB with EOPB0 0xFE, which FNIRSI's start-up sees to before the tester
 // runs. From RAM (an image over SWD sits there) rows are still read as they go.
+// With the Spectrum (ZX) that RAM is the build's own (its 48K, the stack): a
+// picture grabbed there overwrote them and the unit stopped (2026-11-11). So
+// there too rows are read as they go.
 static int16_t g_scrY = -1;             // the next row to send, or -1
-#ifndef RAM_RUN
+#if !defined(RAM_RUN) && !defined(ZX)
+#define SCREEN_GRABBED
 static uint16_t* const FRAME = (uint16_t*)0x20010000u;         // 320 x 240, to 0x20035800
 
 static void grabScreen() {
@@ -258,10 +262,10 @@ static void sendScreen() {
     static uint8_t  runs[320 * 3];
     for (uint8_t k = 0; k < 8 && g_scrY >= 0; k++) {             // a few rows a turn
         if (Q_SIZE - used() < 1500) return;                       // a row is at most ~1.3 kB
-#ifdef RAM_RUN
-        Lcd::readRow(g_scrY, row);
-#else
+#ifdef SCREEN_GRABBED
         memcpy(row, FRAME + g_scrY * 320, sizeof(row));
+#else
+        Lcd::readRow(g_scrY, row);
 #endif
         uint16_t n = 0;
         for (uint16_t x = 0; x < 320; ) {
@@ -316,7 +320,7 @@ static void command(const char* line) {
     int32_t id = fieldNum(line, "id", 0);
     bool ok = field(line, "do", what, sizeof(what));
     if (ok && !strcmp(what, "screen")) {                        // any app: the link's own
-#ifndef RAM_RUN
+#ifdef SCREEN_GRABBED
         grabScreen();
 #endif
         g_scrY = 0;

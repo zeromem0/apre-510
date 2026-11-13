@@ -21,6 +21,33 @@ static const int8_t NITEM = 4;
 static int8_t g_sel = 0;
 static bool   g_pic = false;        // About is on the screen, not the menu
 
+#ifdef MASCOT
+// The mascot, where there is flash for it (MascotData.h, tools/mascot.py): it
+// takes the place of the plug once no key has been touched for a while, its
+// eyes moved now and then (a blink, a look ahead). Any key brings the plug
+// back, and does what it does.
+#include "MascotData.h"
+#define MASCOT_X   10
+#define MASCOT_Y   33          // its middle level with the middle item
+enum { EYES_OPEN, EYES_LEFT, EYES_SHUT };
+static uint8_t  g_eyes = EYES_OPEN;
+static uint32_t g_eyesT0 = 0;
+static bool     g_mascot = false;      // on the screen, in place of the plug
+static uint32_t g_idleT0 = 0;          // the last key
+#define MASCOT_IDLE_MS 10000u
+#define LEFT_W     144                 // the column the plug and the mascot share
+// What shows behind the mascot. The picture was drawn on a dark ground: its
+// arms and legs are as dark, and on a light theme (grey, blue) the hands hung
+// in the air over a black patch. So on anything but a dark menu it stands on
+// a panel of its own ground.
+#define MASCOT_GROUND 0x2104
+static uint16_t g_ground = 0;
+static bool darkGround(uint16_t c) {
+    uint32_t r = (c >> 11) * 8u, g = ((c >> 5) & 63u) * 4u, b = (c & 31u) * 8u;
+    return r * 30u + g * 59u + b * 11u < 4000u;         // under 40 of 255
+}
+#endif
+
 #define ITEM_X     148
 #define ITEM_W     160
 #define ITEM_H     30
@@ -84,6 +111,35 @@ static void drawPlug(Lcd& tft) {
     for (int8_t i = 0; i < 4; i++) pin(tft, PLUG_X - 11, PLUG_Y - 27 + i * 18);
 }
 
+#ifdef MASCOT
+// A picture, or a window of it: a row at a time, each run a line. Colour 0 is
+// what stands behind it (g_ground).
+static void blit(Lcd& tft, const uint8_t* rle, int16_t x0, int16_t y0, int16_t w, int16_t h) {
+    for (int16_t y = 0; y < h; y++) {
+        for (int16_t x = 0; x < w;) {
+            uint8_t b = *rle++;
+            int16_t n = (int16_t)((b >> 4) + 1);
+            tft.fillRect(x0 + x, y0 + y, n, 1, (b & 15) ? MASCOT_PAL[b & 15] : g_ground);
+            x += n;
+        }
+    }
+}
+
+static void drawEyes(Lcd& tft, uint8_t how) {
+    blit(tft, how == EYES_SHUT ? MASCOT_EYES_SHUT : how == EYES_LEFT ? MASCOT_EYES_LEFT : MASCOT_EYES_OPEN,
+         MASCOT_X + MASCOT_EYE_X, MASCOT_Y + MASCOT_EYE_Y, MASCOT_EYE_W, MASCOT_EYE_H);
+    g_eyes = how;
+}
+
+// Nine seconds, over and over: two blinks, and a look ahead before the second.
+static void animate(Lcd& tft) {
+    uint32_t t = (millis() - g_eyesT0) % 9000u;
+    uint8_t how = (t >= 2600 && t < 2740) || (t >= 7700 && t < 7840) ? EYES_SHUT
+                : (t >= 5200 && t < 6400) ? EYES_LEFT : EYES_OPEN;
+    if (how != g_eyes) drawEyes(tft, how);
+}
+#endif
+
 static void drawItem(Lcd& tft, int8_t i) {
     int16_t  y   = ITEM_Y + i * ITEM_STEP;
     bool     on  = (i == g_sel);
@@ -101,6 +157,10 @@ void draw(Lcd& tft) {
     tft.fillScreen(TH.menuBg);
 
     drawPlug(tft);
+#ifdef MASCOT
+    g_mascot = false;
+    g_idleT0 = millis();
+#endif
 
     for (int8_t i = 0; i < NITEM; i++) drawItem(tft, i);
 
@@ -261,6 +321,32 @@ int8_t poll(Lcd& tft) {
         return -1;
     }
     if (autoKey == Keys::LONG) { about(tft); return -1; }
+#ifdef MASCOT
+    // a key touched: any of them reads otherwise than last time (the wheel's
+    // two contacts may rest either way, so a change, not a level)
+    static uint16_t last = 0;
+    uint16_t now = 0;
+    for (uint8_t k = 0; k < Keys::COUNT; k++) if (Keys::down(k)) now |= (uint16_t)(1u << k);
+    bool key = autoKey != 0 || now != last;
+    last = now;
+    if (key) {
+        g_idleT0 = millis();
+        if (g_mascot) {                     // the plug again; the key goes on to the menu below
+            g_mascot = false;
+            tft.fillRect(0, 0, LEFT_W, 240, TH.menuBg);
+            drawPlug(tft);
+        }
+    } else if (!g_mascot && millis() - g_idleT0 >= MASCOT_IDLE_MS) {
+        g_mascot = true;
+        tft.fillRect(0, 0, LEFT_W, 240, TH.menuBg);
+        g_ground = darkGround(TH.menuBg) ? TH.menuBg : MASCOT_GROUND;
+        if (g_ground != TH.menuBg) tft.fillRoundRect(4, MASCOT_Y - 7, 138, MASCOT_H + 14, 8, g_ground);
+        blit(tft, MASCOT_RLE, MASCOT_X, MASCOT_Y, MASCOT_W, MASCOT_H);
+        g_eyes = EYES_OPEN;
+        g_eyesT0 = millis();
+    }
+    if (g_mascot) animate(tft);
+#endif
 
     int8_t was = g_sel;
     // round at the ends: down from the last goes to the first
