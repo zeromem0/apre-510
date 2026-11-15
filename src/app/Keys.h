@@ -47,5 +47,11 @@ bool hit(uint8_t k);
 // Use either this or hit() for a given key on a given screen, not both.
 uint8_t press(uint8_t k);
 
+// A key pressed from USB ({"t":"cmd","do":"key","k":"ok","ms":150}): taken as
+// down for ms, as if held on the case, so every screen sees it the way it sees
+// a finger. The power key from USB is only its short press (RELEARN): the
+// power-off reads the pin itself, so it stays on the case.
+void inject(uint8_t k, uint16_t ms);
+
 }
 #endif

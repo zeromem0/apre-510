@@ -930,6 +930,19 @@ static bool command(const char* what, const char* line) {
     }
     if (app == APP_INSP && !strcmp(what, "again")) { Insp::again(tft); return true; }
     if (!strcmp(what, "app")) return switchApp(line);
+    // "key", "k": up, down, left, right, ok, mode, auto, run or power, and
+    // "ms" (default 150; 1000 is a long press): the key as if pressed on the
+    // case, in whatever screen is showing (Keys::inject).
+    if (!strcmp(what, "key")) {
+        static const char* const NAME[Keys::COUNT] = { "up", "down", "left", "right", "ok", "mode", "auto", "run", "power" };
+        char k[8] = "";
+        Link::field(line, "k", k, sizeof(k));
+        int32_t ms = Link::fieldNum(line, "ms", 150);
+        if (ms < 20 || ms > 3000) return false;
+        for (uint8_t i = 0; i < Keys::COUNT; i++)
+            if (!strcmp(k, NAME[i])) { Keys::inject(i, (uint16_t)ms); return true; }
+        return false;
+    }
     // "peek", "a" and "n" (at most 128): memory read and sent back as hex in
     // {"t":"mem","a":...,"d":"..."}, only within the flash and the SRAM. Read
     // only: to see what lies in flash past the tester (FAP keeps the debugger

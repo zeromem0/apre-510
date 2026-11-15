@@ -25,7 +25,20 @@ void begin() {
     sync();
 }
 
-bool down(uint8_t k) { return k < COUNT && !Pins::read(PIN[k]); }
+static uint32_t g_injUntil[COUNT];     // a key from USB, down till then (0: none)
+
+void inject(uint8_t k, uint16_t ms) {
+    if (k < COUNT) g_injUntil[k] = (millis() + ms) | 1;
+}
+
+bool down(uint8_t k) {
+    if (k >= COUNT) return false;
+    if (g_injUntil[k]) {
+        if ((int32_t)(g_injUntil[k] - millis()) > 0) return true;
+        g_injUntil[k] = 0;
+    }
+    return !Pins::read(PIN[k]);
+}
 
 // Every key is taken as down this moment, whatever it reads: the press that
 // led here may still be bouncing, and a key read up in the middle of that

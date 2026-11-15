@@ -362,7 +362,7 @@ void poll() {
         g_n = 0;
         g_lost = 0;
         put("{\"t\":\"hello\",\"proto\":1,\"dev\":\"DSO-510\",\"fw\":\"" FW_NAME " " FW_VERSION "\",\"bits\":8,"
-            "\"caps\":[\"bytes\",\"insp\",\"frame\",\"wave\",\"state\",\"cmd\",\"theme\",\"app\",\"screen\"]}");
+            "\"caps\":[\"bytes\",\"insp\",\"frame\",\"wave\",\"state\",\"cmd\",\"theme\",\"app\",\"screen\",\"key\"]}");
         if (g_last[0]) put(g_last);
         if (g_state[0]) put(g_state);
         sendTheme();
@@ -378,7 +378,13 @@ void poll() {
             put(out);
         }
     }
-    if (open && !g_openMs && g_scrY >= 0) sendScreen();
+    // A picture asked for goes out in one go as far as it can: rows and packets
+    // in turn for up to 8 ms a turn of the loop, not 8 rows and 2 ms (some 5
+    // pictures a second, most of the time spent waiting for the next turn).
+    if (open && !g_openMs && g_scrY >= 0) {
+        uint32_t t0 = micros();
+        do { sendScreen(); sendSome(); } while (g_scrY >= 0 && micros() - t0 < 8000);
+    }
     if (!open) { g_head = g_tail = 0; g_openMs = 0; g_scrY = -1; }
     g_wasOpen = open;
     if (open && !g_openMs) sendSome();

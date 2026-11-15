@@ -53,12 +53,15 @@ More pictures in [`docs/screens`](docs/screens).
     - characters: a line for each message, with the time since the one before.
   - **SNAP** waits for the first start bit and keeps the message (up to 128 characters), so that
     the first exchange on a line can be looked at; then it waits for the next one by itself.
-- **Settings**, kept in flash: colour theme (ten of them, Halloween and Xmas among them), auto off
-  (off, 10 or 30 minutes), hands-off, what it starts on (AprecID, the menu, or a demo on made-up
-  lines), what the calibration terminal puts out (the 1 kHz square wave, a TTL 9600 8N1 test
-  message to try the probe on, or nothing), and erasing the tester's buffer.
+- **Settings**, kept in flash: colour theme (eleven of them, Halloween, Xmas and Moss, an amber
+  screen, among them), auto off (off, 10 or 30 minutes), hands-off, what it starts on (AprecID,
+  the menu, or a demo on made-up lines), what the calibration terminal puts out (the 1 kHz square
+  wave, a TTL 9600 8N1 test message to try the probe on, or nothing), and erasing the tester's
+  buffer.
 - **USB:** the instrument's own USB socket is a serial port (USB CDC). The results go to the
-  [apre page](https://zeromem0.github.io/apre/) in a browser, or to the apre Android app.
+  [apre page](https://zeromem0.github.io/apre/) in a browser, or to the apre Android app. Over the
+  same port a PC can take a picture of the screen (`screen`) and press the buttons (`key`, as if
+  on the case; switching off stays on the case).
 
 Zero volts on each range comes from the unit's own FNIRSI calibration. The tester reads it from
 flash and never writes there, except its own settings page at the very end of the flash.
@@ -119,7 +122,7 @@ FNIRSI USB update. It needs Python 3; nothing else.
 With the V2.2.1 application from FNIRSI (the `.zip`, or the `APP_*.bin` in it):
 
 ```
-python tools/make_update.py DSO-510_V2.2.1.zip bin/APRE-510_v0.22.bin
+python tools/make_update.py DSO-510_V2.2.1.zip bin/APRE-510_v0.25.bin
 ```
 
 or, after a build of your own (see below), with that build:
