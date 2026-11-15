@@ -16,7 +16,7 @@ electrical health, and the data in hex and ASCII.
 APRE-510 runs **next to the FNIRSI firmware**, which stays as it is. Held at power-on, RUN starts
 APRE-510. Without it, the unit starts the FNIRSI firmware as before.
 
-![APRE-510: About, the menu, then AprecID on a sensor line: waveform, characters, messages](docs/demo.gif)
+![APRE-510 on the Moss theme: About, the menu, then AprecID on a sensor line: characters, waveform, messages; the tester in large type](docs/demo.gif)
 
 More pictures in [`docs/screens`](docs/screens).
 
