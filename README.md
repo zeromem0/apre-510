@@ -18,6 +18,8 @@ APRE-510. Without it, the unit starts the FNIRSI firmware as before.
 
 ![APRE-510 on the Moss theme: About, the menu, then AprecID on a sensor line: characters, waveform, messages; the tester in large type](docs/demo.gif)
 
+The same as a video: [`docs/demo.mp4`](docs/demo.mp4).
+
 More pictures in [`docs/screens`](docs/screens).
 
 > **Note:** this is [T232USB](https://github.com/zeromem0/dso152-tester232-usb) for the DSO-152 and
