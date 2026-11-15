@@ -1533,7 +1533,7 @@ static void step(Lcd& tft) {
             }
             if (fm.decided && !g_decided) {
                 g_decided = true;
-                g_b0 = Rs232::stats().bytes;
+                g_b0 = fm.bytesAt;          // not the count now: a lone message may be read whole by then
                 g_tDecided = now;
             }
             uint32_t frames = g_decided ? Rs232::stats().bytes - g_b0 : 0;

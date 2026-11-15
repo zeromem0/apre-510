@@ -125,7 +125,7 @@ FNIRSI USB update. It needs Python 3; nothing else.
 With the V2.2.1 application from FNIRSI (the `.zip`, or the `APP_*.bin` in it):
 
 ```
-python tools/make_update.py DSO-510_V2.2.1.zip bin/APRE-510_v0.29.bin
+python tools/make_update.py DSO-510_V2.2.1.zip bin/APRE-510_v0.30.bin
 ```
 
 or, after a build of your own (see below), with that build:

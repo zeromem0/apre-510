@@ -45,6 +45,8 @@ struct Format {
     uint8_t stopBits;           // 1 or 2
     bool    decided;            // enough characters agreed on it
     uint8_t framesSeen;
+    uint32_t bytesAt;           // characters read (stats().bytes) at the moment it was decided:
+                                // a short burst is over before the caller looks
 };
 
 const uint8_t MARKS_MAX = 80;

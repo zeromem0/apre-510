@@ -82,6 +82,7 @@ static const Cand CAND[] = {
 static const uint8_t NCAND = sizeof(CAND) / sizeof(CAND[0]);
 static const uint8_t LEARN_BITS = 12;       // captured after the start bit
 static const uint8_t LEARN_FRAMES = 12;     // before the answer is trusted
+static uint32_t g_bytesDecided;             // characters read when the shape was decided
 
 static uint16_t g_alive;                    // one bit a candidate
 static uint8_t  g_chkN, g_chkBad;           // frames since the last check, and bad ones
@@ -169,6 +170,7 @@ static void relearn() {
         g_alive    = (uint16_t)(1u << 5);
         g_framesSeen     = LEARN_FRAMES;
         g_decided  = true;
+        g_bytesDecided = g_bytes;
         g_wantBits = candBits(CAND[5]);
         g_locked   = true;
         g_baud     = g_fixedBaud;           // the bit time follows in feed()
@@ -206,7 +208,7 @@ static bool g_breaks;
 void setBreaks(bool on) { g_breaks = on; }
 bool inverted() { return g_inverted; }
 void noteOverrun() { g_over++; }
-void clearCounts() { g_bytes = g_ferr = g_perr = g_over = g_drop = 0; }
+void clearCounts() { g_bytes = g_ferr = g_perr = g_over = g_drop = 0; g_bytesDecided = 0; }
 
 int available() { return (int)((g_head - g_tail) & FIFO_MASK); }
 
@@ -397,6 +399,7 @@ T232_RAM static void finishFrame() {
         g_wantBits = (shortest == 0xFF) ? 9 : shortest;
         if (g_framesSeen >= LEARN_FRAMES && best != 0xFF) {
             g_decided = true;
+            g_bytesDecided = g_bytes;
             // What went wrong while the speed and the shape were still being
             // worked out says nothing about the line: 200 'U's ahead of clean
             // text at 115200 left P12 standing (2026-10-26). From here on an
@@ -684,6 +687,7 @@ Format format() {
     f.parity     = c.par == 0 ? 'N' : (c.par == 1 ? 'E' : 'O');
     f.stopBits   = c.stop;
     f.decided    = g_decided;
+    f.bytesAt    = g_bytesDecided;
     f.framesSeen = g_framesSeen;
     return f;
 }
