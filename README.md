@@ -40,7 +40,8 @@ More pictures in [`docs/screens`](docs/screens).
   - Modbus RTU, RS485 (A and B wires), CAN (H and L), I2C (SCL), LIN, PWM (a square wave at a
     rate that is no standard speed is named PWM, not serial), each with details on AUTO.
   - **Hands-off** (Settings): the line is watched and recognised again when it changes, with a
-    beep at each result.
+    beep at each result. While watching, the waveform stays live and three squares in the top bar
+    move, lighting up together when characters come.
 - **RS232 Tester:**
   - RS232 or TTL levels.
   - 9600 8N1, 19200 8N1, or speed and frame worked out from the line, up to 115200 baud. Worked
@@ -124,7 +125,7 @@ FNIRSI USB update. It needs Python 3; nothing else.
 With the V2.2.1 application from FNIRSI (the `.zip`, or the `APP_*.bin` in it):
 
 ```
-python tools/make_update.py DSO-510_V2.2.1.zip bin/APRE-510_v0.26.bin
+python tools/make_update.py DSO-510_V2.2.1.zip bin/APRE-510_v0.29.bin
 ```
 
 or, after a build of your own (see below), with that build:

@@ -624,7 +624,11 @@ static void timing(Feat& f) {
 // A block of the signal, for the screen: of the blocks at the range in
 // force, the latest whose swing is at least three quarters of the widest so
 // far, so that a line that talks in bursts is shown talking. Not taken while
-// the screen is drawing it.
+// the screen is drawing it. Once the result is up, the picture is live as
+// well: a burst stays up WAVE_HOLD_MS, then the line as it is now, quiet or
+// not, so that the screen shows the line is still being watched.
+#define WAVE_HOLD_MS 3000u
+static uint32_t g_waveWideMs;           // when the last wide block was taken
 static uint16_t g_wave[Acq::BUF_LEN / 2];
 static uint16_t g_waveN;
 static uint32_t g_waveHz;
@@ -640,7 +644,9 @@ T232_RAM static void keep(const uint16_t* s, uint16_t n) {
         if (v > hi) hi = v;
     }
     uint16_t span = (uint16_t)(hi - lo);
-    if (g_waveN && (uint32_t)span * 4 < (uint32_t)g_waveSpan * 3) return;
+    bool wide = !g_waveN || (uint32_t)span * 4 >= (uint32_t)g_waveSpan * 3;
+    if (!wide && (g_phase != P_DONE || millis() - g_waveWideMs < WAVE_HOLD_MS)) return;
+    if (wide) g_waveWideMs = millis();
     if (span > g_waveSpan) g_waveSpan = span;
     if (n > Acq::BUF_LEN / 2) n = Acq::BUF_LEN / 2;
     memcpy(g_wave, s, n * sizeof(uint16_t));
@@ -724,7 +730,7 @@ T232_RAM void block(const uint16_t* s, uint16_t n, bool overrun) {
         return;
     }
     if (ph == P_TEACH) { capTake(s, n); return; }
-    if (ph == P_LEVELS || ph == P_EDGES) keep(s, n);
+    if (ph == P_LEVELS || ph == P_EDGES || ph == P_DONE) keep(s, n);
     if (ph == P_WIDE || ph == P_LEVELS) {
         uint16_t lo = g_lo, hi = g_hi;
         uint32_t sum = 0;
@@ -778,7 +784,28 @@ T232_RAM void block(const uint16_t* s, uint16_t n, bool overrun) {
 #define RX_Y       206
 #define FOOT_Y     228
 
+// A sign of life in the bar while a result is watched or traffic waited for:
+// three small squares before the word, one lit and moving on every third of a
+// second, all three lit for a moment when characters come. Without it a line
+// that talks every half minute leaves a screen that may as well be frozen.
+static int16_t  g_tickX = 0;            // where the squares go, 0: not now
+static uint8_t  g_tickShown = 0xFF;     // what they show (0..2 the lit one, 3 all)
+static uint32_t g_rxMs = 0;             // the last character read
+
+static void tick(Lcd& tft) {
+    if (!g_tickX) return;
+    uint32_t now = millis();
+    uint8_t s = (g_rxMs && now - g_rxMs < 250) ? 3 : (uint8_t)((now / 333) % 3);
+    if (s == g_tickShown) return;
+    g_tickShown = s;
+    for (uint8_t i = 0; i < 3; i++)
+        tft.fillRect(g_tickX + i * 7, 8, 4, 4, (s == 3 || s == i) ? TH.barHi : TH.muted);
+}
+
 static void bar(Lcd& tft, const char* what) {
+    bool live = !strcmp(what, "watching") || !strcmp(what, "waiting for traffic");
+    g_tickX = live ? 50 : 0;            // between "AprecID" and the word: "waiting for traffic" reaches the range
+    g_tickShown = 0xFF;
     tft.fillRect(0, 0, 320, 20, TH.bar);
     tft.setTextSize(1);
     tft.setTextColor(TH.barText, TH.bar);
@@ -2088,6 +2115,7 @@ static void takeRx(Lcd& tft) {
         if (g_phase == P_DONE) Link::rx((uint8_t)c, "insp");      // once the result is up: before, the frame may be guessed wrong
         any = true;
     }
+    if (any) g_rxMs = millis() | 1;
     if (!g_v.lin) g_rx[g_rxN] = 0;
     mbIdle();
     if (any && g_phase == P_DONE && !g_teach && millis() - g_drawMs >= 300) { drawRx(tft); g_drawMs = millis(); }
@@ -2116,6 +2144,7 @@ uint8_t poll(Lcd& tft) {
     }
     step(tft);
     if (g_phase == P_UART || g_phase == P_DONE) takeRx(tft);
+    if (!g_teach) tick(tft);
     static uint32_t waveMs;
     if (g_phase == P_DONE && !g_teach && g_waveNew && millis() - waveMs >= 500) { drawWave(tft); waveMs = millis(); }
 
