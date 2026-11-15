@@ -36,16 +36,11 @@ static bool     g_mascot = false;      // on the screen, in place of the plug
 static uint32_t g_idleT0 = 0;          // the last key
 #define MASCOT_IDLE_MS 10000u
 #define LEFT_W     144                 // the column the plug and the mascot share
-// What shows behind the mascot. The picture was drawn on a dark ground: its
-// arms and legs are as dark, and on a light theme (grey, blue) the hands hung
-// in the air over a black patch. So on anything but a dark menu it stands on
-// a panel of its own ground.
-#define MASCOT_GROUND 0x2104
+// What shows behind the mascot: the menu's own ground. Its arms and legs,
+// drawn in the dark of the picture's ground, are black in the picture now and
+// it has a black line all round (tools/mascot.py), so it stands on any theme
+// without a panel of its own.
 static uint16_t g_ground = 0;
-static bool darkGround(uint16_t c) {
-    uint32_t r = (c >> 11) * 8u, g = ((c >> 5) & 63u) * 4u, b = (c & 31u) * 8u;
-    return r * 30u + g * 59u + b * 11u < 4000u;         // under 40 of 255
-}
 #endif
 
 #define ITEM_X     148
@@ -339,8 +334,7 @@ int8_t poll(Lcd& tft) {
     } else if (!g_mascot && millis() - g_idleT0 >= MASCOT_IDLE_MS) {
         g_mascot = true;
         tft.fillRect(0, 0, LEFT_W, 240, TH.menuBg);
-        g_ground = darkGround(TH.menuBg) ? TH.menuBg : MASCOT_GROUND;
-        if (g_ground != TH.menuBg) tft.fillRoundRect(4, MASCOT_Y - 7, 138, MASCOT_H + 14, 8, g_ground);
+        g_ground = TH.menuBg;
         blit(tft, MASCOT_RLE, MASCOT_X, MASCOT_Y, MASCOT_W, MASCOT_H);
         g_eyes = EYES_OPEN;
         g_eyesT0 = millis();
