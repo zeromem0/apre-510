@@ -97,13 +97,21 @@ static int      scrollFirstLine = -1;
 static const uint32_t RATES[] = { 100000, 250000, 500000, 1250000, 2000000 };
 static uint8_t rateIdx = 0;
 
-// AUTO steps through these. The two fixed ones are 8N1 and bring their own
-// sample rate, a little over ten samples a bit; the third works the speed and
-// the shape out from the line, at whatever rate UP and DOWN have set.
+// AUTO steps through these. The two fixed speeds bring their own sample rate,
+// a little over ten samples a bit, and work the frame out from the line (they
+// were 8N1 outright: on a 9600 8E1 line half the characters were lost). A
+// works the speed and the frame out, at whatever rate UP and DOWN have set.
+// L (locked) keeps what A found, speed and frame, and learns nothing more: a
+// line that sends a message now and then has each one read from its first
+// edge, with no learning again between them. Offered only once A has found
+// both; after it AUTO goes back to 9600.
 #define SPEED_9600   0
 #define SPEED_19200  1
 #define SPEED_AUTO   2
+#define SPEED_LOCK   3
 static uint8_t speedMode = SPEED_9600;
+static uint32_t lockBaud;               // what L holds
+static Rs232::Format lockFmt;
 
 
 
@@ -290,6 +298,7 @@ static void updateStatusBar() {
 
     tft.setCursor(110, 6);
     if (speedMode == SPEED_AUTO) tft.print("A ");
+    if (speedMode == SPEED_LOCK) tft.print("L ");
     if (st.locked && st.baud) {
         Rs232::Format f = Rs232::format();
         tft.print(st.baud);
@@ -371,7 +380,12 @@ static void applySpeedMode() {
     if (speedMode == SPEED_19200) rateIdx = 1;
     Acq::setSampleRate(RATES[rateIdx]);
     Acq::pause();
-    Rs232::setFixedBaud(speedMode == SPEED_9600 ? 9600 : speedMode == SPEED_19200 ? 19200 : 0);
+    if (speedMode == SPEED_LOCK) {
+        Rs232::setFixedBaud(lockBaud);
+        Rs232::setFixedFrame(lockFmt.dataBits, lockFmt.parity, lockFmt.stopBits);
+    } else {
+        Rs232::setFixedBaud(speedMode == SPEED_9600 ? 9600 : speedMode == SPEED_19200 ? 19200 : 0, true);
+    }
     Rs232::reset();
     Acq::resume();
 }
@@ -868,7 +882,7 @@ static void stateJson(char* buf, uint16_t size) {
         char fmt[4] = { (char)('0' + f.dataBits), f.parity, (char)('0' + f.stopBits), 0 };
         uint32_t baud = Rs232::fixedBaud() ? Rs232::fixedBaud() : Rs232::stats().baud;
         j.str("run", run).str("view", displayMode < 6 ? VIEW[displayMode] : "?")
-         .num("baud", (int32_t)baud).flag("auto", speedMode == SPEED_AUTO)
+         .num("baud", (int32_t)baud).flag("auto", speedMode == SPEED_AUTO).flag("lock", speedMode == SPEED_LOCK)
          .str("fmt", f.decided ? fmt : "").num("rateHz", (int32_t)Acq::sampleRate());
     }
     j.num("range", Frontend::range());
@@ -976,10 +990,11 @@ void setup() {
     Pins::begin();
     Keys::begin();
 #if defined(ZX) && !defined(RAM_RUN)
-    // RUN brought the tester in; DOWN held with it asks for the Spectrum
-    // (src/zx). Read now, used once the keys are let go and the clock is up.
+    // RUN brought the tester in; DOWN held with it asks for the Spectrum with
+    // Serpenti, UP with Zynaps (src/zx). Read now, used once the keys are let
+    // go and the clock is up.
     delay(2);
-    bool zx = Keys::down(Keys::DOWN);
+    uint8_t zx = Keys::down(Keys::DOWN) ? 1 : Keys::down(Keys::UP) ? 2 : 0;
 #endif
 
     Config::load();                     // the theme, before anything is drawn
@@ -1027,7 +1042,7 @@ void setup() {
     tft.backlight(60);                  // its PWM counts from the clock
     CalOut::apply();                    // on the backlight's timer, or its own: after the clock
 #if defined(ZX) && !defined(RAM_RUN)
-    if (zx) Zx::run(tft, powerOff);     // never returns
+    if (zx) Zx::run(tft, powerOff, (uint8_t)(zx - 1));     // never returns
 #endif
     Acq::setSampleRate(RATES[rateIdx]);
 #ifndef RAM_RUN
@@ -1335,7 +1350,15 @@ static bool testerLoop() {
     // the threshold back to the middle of the levels.
     uint8_t autoKey = Keys::press(Keys::AUTO);
     if (autoKey == Keys::SHORT) {
-        speedMode = (uint8_t)((speedMode + 1) % 3);
+        Rs232::Stats  ls = Rs232::stats();
+        Rs232::Format lf = Rs232::format();
+        if (speedMode == SPEED_AUTO && ls.locked && ls.baud && lf.decided) {
+            lockBaud = ls.baud;             // A has found the line: L keeps it
+            lockFmt  = lf;
+            speedMode = SPEED_LOCK;
+        } else {
+            speedMode = speedMode == SPEED_9600 ? SPEED_19200 : speedMode == SPEED_19200 ? SPEED_AUTO : SPEED_9600;
+        }
         applySpeedMode();
         updateStatusBar();
         if (displayMode == MODE_TEACH) Teach::draw(tft, waveSnap, waveN, !running);

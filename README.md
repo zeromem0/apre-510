@@ -44,8 +44,10 @@ More pictures in [`docs/screens`](docs/screens).
     move, lighting up together when characters come.
 - **RS232 Tester:**
   - RS232 or TTL levels.
-  - 9600 8N1, 19200 8N1, or speed and frame worked out from the line, up to 115200 baud. Worked
-    out from the line, the sample rate follows the speed by itself.
+  - 9600 or 19200 (the frame worked out from the line), or speed and frame worked out from the
+    line, up to 115200 baud; the sample rate then follows the speed by itself. Once found, they can
+    be locked (`L`): nothing is learnt any more, and a line that sends a message now and then has
+    every one read whole.
   - Views:
     - protocol: the waveform with the decoded characters under it;
     - single character: one frame drawn bit by bit, with the levels, the threshold and where each
@@ -103,7 +105,7 @@ In the **RS232 Tester**:
 | MODE | held | In `WAIT` only: a simulated message, received as if from the line |
 | ◄ ► | short | Range down / up |
 | ▲ ▼ | short | Sample rate up / down: 100 k, 250 k, 500 k, 1.25 M, 2 M samples/s |
-| AUTO | short | Speed: 9600 8N1 → 19200 8N1 → worked out from the line (`A` in the bar) |
+| AUTO | short | Speed: 9600 → 19200 → worked out from the line (`A` in the bar) → locked on what `A` found (`L`, once it has found it) |
 | OK | short | RS232 ↔ TTL |
 | POWER | short | Learn the speed and the frame again |
 
@@ -125,7 +127,7 @@ FNIRSI USB update. It needs Python 3; nothing else.
 With the V2.2.1 application from FNIRSI (the `.zip`, or the `APP_*.bin` in it):
 
 ```
-python tools/make_update.py DSO-510_V2.2.1.zip bin/APRE-510_v0.30.bin
+python tools/make_update.py DSO-510_V2.2.1.zip bin/APRE-510_v0.33.bin
 ```
 
 or, after a build of your own (see below), with that build:

@@ -36,7 +36,7 @@
 <body>
 <main>
 
-<h1>Power <small>DSO-510, APRE-510 v0.30, next to the FNIRSI firmware V2.2.1</small></h1>
+<h1>Power <small>DSO-510, APRE-510 v0.33, next to the FNIRSI firmware V2.2.1</small></h1>
 <div class="frame"><div class="scroll">
 <table>
   <tr><th>Buttons</th><th>Press</th><th>What it does</th></tr>
@@ -54,7 +54,7 @@
   <tr><td class="b">◄ ►<small>wheel</small></td><td class="op">short</td><td>/</td><td>Demo only: another made-up signal</td><td>Range: R0 … R9</td><td>The value</td></tr>
   <tr><td class="b" rowspan="2">OK<small>wheel pressed</small></td><td class="op">short</td><td>Start the chosen one</td><td>Into the tester, on the line found (on <code>A</code>)</td><td><code>RS232</code> ↔ <code>TTL</code></td><td>Save and back to the menu</td></tr>
   <tr><td class="op">held</td><td>/</td><td colspan="2" class="w"><b>Back to the menu</b></td><td>/</td></tr>
-  <tr><td class="b" rowspan="2">AUTO</td><td class="op">short</td><td>/</td><td>Details (see below)</td><td>Speed: 9600 → 19200 → <code>A</code></td><td>/</td></tr>
+  <tr><td class="b" rowspan="2">AUTO</td><td class="op">short</td><td>/</td><td>Details (see below)</td><td>Speed: 9600 → 19200 → <code>A</code> → <code>L</code></td><td>/</td></tr>
   <tr><td class="op">held</td><td>About</td><td>/</td><td>Single character view: threshold to the middle</td><td>On Buffer: empties it</td></tr>
   <tr><td class="b" rowspan="2">MODE</td><td class="op">short</td><td>/</td><td>Text in boxes → waveform → messages a line each</td><td>Next view; after the last, back to AprecID (if entered from there)</td><td>Save and back to the menu</td></tr>
   <tr><td class="op">held</td><td>/</td><td>/</td><td>In <code>WAIT</code>: a simulated message</td><td>/</td></tr>
@@ -99,7 +99,7 @@
   <tr><td class="b">►</td><td class="op">short</td><td colspan="2">Range up, to R9</td></tr>
   <tr><td class="b">▲</td><td class="op">short</td><td colspan="2">Sample rate up: 100 k → 250 k → 500 k → 1.25 M → 2 M S/s</td></tr>
   <tr><td class="b">▼</td><td class="op">short</td><td colspan="2">Sample rate down</td></tr>
-  <tr><td class="b">AUTO</td><td class="op">short</td><td colspan="2">Speed: 9600 8N1 → 19200 8N1 → worked out from the line (<code>A</code> in the bar). On <code>A</code> the rate follows the line by itself (8–40 samples a bit, at most 1.25 MS/s).</td></tr>
+  <tr><td class="b">AUTO</td><td class="op">short</td><td colspan="2">Speed: 9600 → 19200 (the frame worked out from the line) → worked out from the line (<code>A</code> in the bar) → <code>L</code>, locked on the speed and frame <code>A</code> found, nothing learnt any more: every message read from its first edge, however rare (offered once <code>A</code> has found them; then back to 9600). On <code>A</code> the rate follows the line by itself (8–40 samples a bit, at most 1.25 MS/s).</td></tr>
   <tr><td class="b" rowspan="2">OK</td><td class="op">short</td><td colspan="2">Line type: <code>RS232</code> (rests negative) ↔ <code>TTL</code> (rests positive)</td></tr>
   <tr><td class="op">held</td><td colspan="2" class="w">Back to the menu; the buffer is kept</td></tr>
   <tr><td class="b" rowspan="2">MODE</td><td class="op">short</td><td colspan="2">View: protocol → single character → bus health → large → hex → characters. <b>Entered from AprecID:</b> after characters, back to AprecID.</td></tr>

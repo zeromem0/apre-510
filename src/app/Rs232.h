@@ -37,6 +37,11 @@ struct Stats {
     uint32_t dropped;           // characters decoded but not collected in time
     bool     locked;            // the bit time is known
     bool     levels;            // lo and hi are a signal's, not one block's extremes
+    // Edges inside frames, since the shape was settled: on a bit boundary
+    // (within a quarter of a bit) or off it. A serial line has them all on;
+    // a line that is not one (I2C SDA, a speed read wrongly) has many off,
+    // though the one sample a bit takes may still make frames of it.
+    uint32_t edgesOn, edgesOff;
 };
 
 struct Format {
@@ -60,6 +65,9 @@ void  reset();                  // forget the speed and the shape, learn again
 // With learnFrame the speed is given but the frame is still worked out from
 // the line (the inspector's first try, at 9600).
 void     setFixedBaud(uint32_t baud, bool learnFrame = false);
+// After setFixedBaud(baud): the frame given outright instead of 8N1 (the
+// tester's L, locked on what AUTO found). False if no such frame is known.
+bool     setFixedFrame(uint8_t dataBits, char parity, uint8_t stopBits);
 bool     isStandard(uint32_t baud);         // one of the standard speeds, exactly
 uint32_t fixedBaud();
 

@@ -63,6 +63,7 @@ static bool     g_assumed;
 // Not zero: this speed, 8N1, and none of the learning below takes part.
 static uint32_t g_fixedBaud = 9600;
 static bool     g_fixedLearn;       // ... but the frame is learnt all the same
+static uint8_t  g_fixedFmt = 5;     // ... or the frame given with it (CAND index; 5 = 8N1)
 
 // --- frame shape ----------------------------------------------------------
 // Every candidate, in the order they are preferred when more than one still
@@ -85,6 +86,10 @@ static const uint8_t LEARN_FRAMES = 12;     // before the answer is trusted
 static uint32_t g_bytesDecided;             // characters read when the shape was decided
 
 static uint16_t g_alive;                    // one bit a candidate
+static uint8_t  g_fails[NCAND];             // frames each has been contradicted by (finishFrame())
+static uint8_t  g_streak[NCAND];            // ... and frames held in a row since the last
+static uint16_t g_probe;                    // longer, preferred shapes being tried (finishFrame()), all one length
+static uint16_t g_excluded;                 // shapes that failed their try: out until the speed is learnt again
 static uint8_t  g_chkN, g_chkBad;           // frames since the last check, and bad ones
 static uint8_t  g_framesSeen;               // frames since learning began
 static bool     g_decided;
@@ -111,6 +116,17 @@ static const uint16_t FIFO_MASK = 2047;
 static uint16_t g_fifo[FIFO_MASK + 1];          // bytes, and BREAK
 static volatile uint16_t g_head, g_tail;
 static uint32_t g_bytes, g_ferr, g_perr, g_over, g_drop;
+static uint32_t g_edgeOn, g_edgeOff;            // edges in frames on and off the bit boundaries (Stats)
+// The stop bits from the gaps between characters back to back. A frame read
+// with one stop ends at the middle of it (its last sample); the next start
+// bit comes half a bit later if one stop is all there is, a bit and a half if
+// there are two: the second one, at rest, looks like rest and nothing in the
+// frames can tell (8N2 read 8N1, 7E2 read 7E1: test/host, matrix.py). Gaps
+// longer than two bits are pauses and say nothing.
+static uint32_t g_sampleNow, g_blkBase;         // samples fed so far; where this block starts
+static uint32_t g_nowAbs;                       // the sample being taken, for finishFrame()
+static uint32_t g_lastEnd;                      // where the last frame read ended, 0: none
+static uint16_t g_gap0, g_gap1;                 // next start half a bit on, and a bit and a half
 
 // --- what the screen draws ------------------------------------------------
 static uint16_t g_marks[MARKS_MAX];
@@ -148,7 +164,11 @@ void begin() { reset(); }
 
 static void relearnFormat() {
     g_pend = false;
-    g_alive = (uint16_t)((1u << NCAND) - 1u);
+    g_alive = (uint16_t)(((1u << NCAND) - 1u) & ~g_excluded);
+    memset(g_fails, 0, sizeof(g_fails));
+    memset(g_streak, 0, sizeof(g_streak));
+    g_probe = 0;
+    g_gap0 = g_gap1 = 0; g_lastEnd = 0;
     g_framesSeen = 0; g_decided = false; g_fmtIdx = 5;   // 8N1 until shown otherwise
     g_wantBits = 9;      // 8N1 and 7E1 both, the usual two
     g_chkN = 0; g_chkBad = 0;
@@ -159,6 +179,7 @@ static void relearn() {
     for (uint8_t i = 0; i < 8; i++) g_shortest[i] = 0xFFFF;
     g_runCount = 0; g_runLen = 0;
     g_bitQ8 = 0; g_baud = 0; g_locked = false; g_assumed = false;
+    g_excluded = 0;
     relearnFormat();
     g_inFrame = false; g_frameBitN = 0; g_frameBits = 0; g_frameStart = -1;
 
@@ -166,18 +187,28 @@ static void relearn() {
         g_locked   = true;
         g_baud     = g_fixedBaud;           // the bit time follows in feed()
     } else if (g_fixedBaud) {
-        g_fmtIdx   = 5;                     // 8N1
-        g_alive    = (uint16_t)(1u << 5);
+        g_fmtIdx   = g_fixedFmt;            // 8N1, or the frame given
+        g_alive    = (uint16_t)(1u << g_fixedFmt);
         g_framesSeen     = LEARN_FRAMES;
         g_decided  = true;
         g_bytesDecided = g_bytes;
-        g_wantBits = candBits(CAND[5]);
+        g_wantBits = candBits(CAND[g_fixedFmt]);
         g_locked   = true;
         g_baud     = g_fixedBaud;           // the bit time follows in feed()
     }
 }
 
-void     setFixedBaud(uint32_t baud, bool learnFrame) { g_fixedBaud = baud; g_fixedLearn = baud && learnFrame; }
+void     setFixedBaud(uint32_t baud, bool learnFrame) { g_fixedBaud = baud; g_fixedLearn = baud && learnFrame; g_fixedFmt = 5; }
+bool     setFixedFrame(uint8_t dataBits, char parity, uint8_t stopBits) {
+    uint8_t par = parity == 'E' ? 1 : parity == 'O' ? 2 : 0;
+    for (uint8_t i = 0; i < NCAND; i++)
+        if (CAND[i].data == dataBits && CAND[i].par == par && CAND[i].stop == stopBits) {
+            g_fixedFmt = i;
+            g_fixedLearn = false;
+            return true;
+        }
+    return false;
+}
 bool     isStandard(uint32_t baud) {
     for (uint8_t i = 0; i < sizeof(STD_BAUD) / sizeof(STD_BAUD[0]); i++) if (STD_BAUD[i] == baud) return true;
     return false;
@@ -208,7 +239,7 @@ static bool g_breaks;
 void setBreaks(bool on) { g_breaks = on; }
 bool inverted() { return g_inverted; }
 void noteOverrun() { g_over++; }
-void clearCounts() { g_bytes = g_ferr = g_perr = g_over = g_drop = 0; g_bytesDecided = 0; }
+void clearCounts() { g_bytes = g_ferr = g_perr = g_over = g_drop = 0; g_bytesDecided = 0; g_edgeOn = g_edgeOff = 0; }
 
 int available() { return (int)((g_head - g_tail) & FIFO_MASK); }
 
@@ -337,12 +368,50 @@ T232_RAM static void finishFrame() {
         // struck out: there is nothing to judge it on yet.
         bool longer = false;                 // shapes alive that this window cannot judge
         uint16_t still = 0;
+        // Two contradictions are forgiven: learning that starts in the middle
+        // of characters back to back takes a wrong start bit or two before it
+        // falls in step, and that struck out 7O1 on clean 7O1 text (the sigrok
+        // capture hello_world_7o1_115200) and 7E1 on 7E1 text (test/host,
+        // matrix.py), leaving 8N1, which neither ever contradicts. A wrong
+        // shape fails half its frames or more, and still dies within a few.
+        // While longer shapes are tried (g_probe), only they are judged: the
+        // window, longer than the frame of a shorter one, misreads the frames
+        // that follow it, and that is not their fault.
         for (uint8_t i = 0; i < NCAND; i++) {
             if (!(g_alive & (1u << i))) continue;
+            if (g_probe && !(g_probe & (1u << i))) { still |= (uint16_t)(1u << i); continue; }
             if (candBits(CAND[i]) > g_frameBitN) { still |= (uint16_t)(1u << i); longer = true; continue; }
-            if (tryCand(CAND[i], g_frameBits, g_frameBitN) >= 0) still |= (uint16_t)(1u << i);
+            if (tryCand(CAND[i], g_frameBits, g_frameBitN) >= 0) {
+                if (g_streak[i] < 255) g_streak[i]++;
+                still |= (uint16_t)(1u << i);
+            } else {
+                g_streak[i] = 0;
+                if (++g_fails[i] < 3) still |= (uint16_t)(1u << i);
+            }
         }
-        if (still) g_alive = still;          // never strike them all out
+        if (g_probe && !(still & g_probe)) {
+            // The longer shape failed. Its window has misread the frames after
+            // each of its own, so learning starts again from the top, the
+            // others all standing, that one out (taking up again where it was,
+            // four frames on, 8N1 binary back to back came out 7E2 or not
+            // serial at all: matrix.py).
+            g_excluded |= g_probe;
+            relearnFormat();
+            g_inFrame = false;
+            g_frameStart = -1;
+            return;
+        }
+        if (!still) {
+            // Every shape struck out: learning fell out of step (7N1 binary
+            // back to back at 19200 was left with 8O2 alone, failing frame
+            // after frame and never settled: matrix.py). From the top again.
+            g_excluded = 0;
+            relearnFormat();
+            g_inFrame = false;
+            g_frameStart = -1;
+            return;
+        }
+        g_alive = still;
         if (g_framesSeen < 255) g_framesSeen++;
 
         // Two different questions, and answering both with one candidate is
@@ -396,8 +465,41 @@ T232_RAM static void finishFrame() {
         // candidate and leaves the loosest one standing. If the length is
         // wrong the stop bits stop landing on mark, that candidate dies, and
         // the next one brings its own length with it.
-        g_wantBits = (shortest == 0xFF) ? 9 : shortest;
-        if (g_framesSeen >= LEARN_FRAMES && best != 0xFF) {
+        uint8_t probeBits = 0;
+        for (uint8_t i = 0; i < NCAND; i++)
+            if (g_probe & (1u << i)) { probeBits = candBits(CAND[i]); break; }
+        g_wantBits = probeBits ? probeBits : (shortest == 0xFF) ? 9 : shortest;
+        // Before settling: a shape preferred to the one found (a parity in
+        // it) that is longer than the window has never been judged. 8O1 with
+        // its top bit always 1 was read 7N1 at 19200, 8O1 never looked at
+        // (matrix.py). So it is tried, with its own window, for six frames;
+        // failing, it is out, and the shorter ones are taken up again.
+        // All the shapes of one length are tried at once (8E1 and 8O1 on 8N1
+        // binary): one after the other, each failure starting learning over,
+        // took the time AprecID gives a line (matrix.py, 19200 with pauses).
+        if (g_framesSeen >= LEARN_FRAMES && best != 0xFF && !g_probe) {
+            uint8_t len = 0xFF;
+            for (uint8_t i = 0; i < best; i++)
+                if ((g_alive & (1u << i)) && candBits(CAND[i]) > g_frameBitN && candBits(CAND[i]) < len)
+                    len = candBits(CAND[i]);
+            if (len != 0xFF) {
+                for (uint8_t i = 0; i < best; i++)
+                    if ((g_alive & (1u << i)) && candBits(CAND[i]) == len) g_probe |= (uint16_t)(1u << i);
+                g_wantBits = len;
+                g_framesSeen = LEARN_FRAMES - 6;
+            }
+        }
+        if (g_probe && best != 0xFF && (g_probe & (1u << best)) && g_framesSeen >= LEARN_FRAMES) g_probe = 0;   // six frames held
+#ifdef HOST_TEST
+        if (getenv("RS232_TRACE"))
+            printf("learn: seen %u alive %03x excl %03x best %d probe %03x want %u bits %03x/%u\n", g_framesSeen,
+                   g_alive, g_excluded, best == 0xFF ? -1 : best, g_probe, g_wantBits, g_frameBits, g_frameBitN);
+#endif
+        // Settled only on a shape that has held eight frames in a row: with
+        // two contradictions forgiven, 7O1 on 8N1 binary (its parity right
+        // half the time) lived long enough to be taken, and the reading that
+        // followed was not serial (matrix.py). Eight in a row by chance: 1 in 256.
+        if (g_framesSeen >= LEARN_FRAMES && best != 0xFF && !g_probe && g_streak[best] >= 8) {
             g_decided = true;
             g_bytesDecided = g_bytes;
             // What went wrong while the speed and the shape were still being
@@ -405,10 +507,13 @@ T232_RAM static void finishFrame() {
             // text at 115200 left P12 standing (2026-10-26). From here on an
             // error count means errors.
             g_ferr = g_perr = g_over = g_drop = 0;
+            g_edgeOn = g_edgeOff = 0;
+            g_gap0 = g_gap1 = 0; g_lastEnd = 0;
         }
     } else {
         int16_t v = tryCand(CAND[g_fmtIdx], g_frameBits, g_frameBitN);
         if (v >= 0) {
+            g_lastEnd = g_nowAbs ? g_nowAbs : 1;    // the middle of its stop: the gap to the next start counts from here
             pushByte((uint8_t)v);
             if (g_frameStart >= 0 && g_byteN < BYTES_MAX) {
                 g_byteAt[g_byteN]  = (uint16_t)g_frameStart;
@@ -517,7 +622,25 @@ T232_RAM static void scan(const uint16_t* s, uint16_t n, bool learn, bool decode
         if (one != cur) {
             if (learn) offerRun(run);
             run = 0;
+            // An edge in a frame, once the shape is settled: on a boundary the
+            // next bit's middle is half a bit away. Off by more than a quarter
+            // of a bit, it is not a serial line's edge at this speed.
+            if (decode && g_inFrame && g_decided) {
+                int32_t d = phase - (int32_t)(g_bitQ8 >> 1);
+                if (d < 0) d = -d;
+                if (d > (int32_t)(g_bitQ8 >> 2)) g_edgeOff++;
+                else                             g_edgeOn++;
+            }
             if (decode && !g_inFrame && cur && !one && g_locked) {
+                if (g_lastEnd) {                // how long after the last frame's stop
+                    uint32_t d = g_blkBase + i - g_lastEnd;
+                    if (d < 65536u) {
+                        uint32_t dq = d << 8;
+                        if (dq < g_bitQ8)           { if (g_gap0 < 0xFFFF) g_gap0++; }
+                        else if (dq < 2u * g_bitQ8) { if (g_gap1 < 0xFFFF) g_gap1++; }
+                    }
+                    g_lastEnd = 0;
+                }
                 g_inFrame      = true;
                 g_frameStart = (int32_t)i;
                 if (g_firstStart < 0) g_firstStart = (int32_t)i;
@@ -537,7 +660,7 @@ T232_RAM static void scan(const uint16_t* s, uint16_t n, bool learn, bool decode
                 g_frameBitN++;
                 phase += (int32_t)g_bitQ8;
 
-                if (g_frameBitN >= g_wantBits) finishFrame();
+                if (g_frameBitN >= g_wantBits) { g_nowAbs = g_blkBase + i; finishFrame(); }
             }
         }
         i++;
@@ -624,6 +747,8 @@ T232_RAM void feed(const uint16_t* s, uint16_t n, uint32_t sampleHz, uint16_t lo
 
     if (!g_haveLevels && !g_thManual) return;   // nothing to split on yet
 
+    g_blkBase = g_sampleNow;                // where this block lies on the line's own count
+    g_sampleNow += n;
     uint16_t span = (g_haveLevels && g_hi > g_lo) ? (uint16_t)(g_hi - g_lo) : 0;
     g_th   = g_thManual ? g_thManual : (uint16_t)((g_lo + g_hi) >> 1);
     g_hyst = (uint16_t)(span >> 3);
@@ -677,6 +802,7 @@ Stats stats() {
     st.parityErrors = g_perr; st.overruns = g_over; st.dropped = g_drop;
     st.locked = g_locked;
     st.levels = g_haveLevels;
+    st.edgesOn = g_edgeOn; st.edgesOff = g_edgeOff;
     return st;
 }
 
@@ -686,6 +812,9 @@ Format format() {
     f.dataBits   = c.data;
     f.parity     = c.par == 0 ? 'N' : (c.par == 1 ? 'E' : 'O');
     f.stopBits   = c.stop;
+    // A second stop, from the gaps: at least six characters back to back a
+    // bit and a half after the stop's middle, and none half a bit after.
+    if (c.stop == 1 && g_decided && g_gap1 >= 6 && g_gap0 == 0) f.stopBits = 2;
     f.decided    = g_decided;
     f.bytesAt    = g_bytesDecided;
     f.framesSeen = g_framesSeen;
